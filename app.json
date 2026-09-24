@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "naghshman",
+    "name": "نقش من",
     "slug": "naghshman",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -17,7 +17,8 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "ir.naghshman.app"
     },
     "web": {
       "output": "static",
@@ -32,11 +33,26 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
         }
-      ]
+      ],
+      [
+        "expo-font",
+        {
+          "fonts": [
+            "./assets/fonts/Yekan.ttf"
+          ]
+        }
+      ],
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "e4788dfb-4695-40d8-bfa6-774aeae4e836"
+      }
     }
   }
 }
