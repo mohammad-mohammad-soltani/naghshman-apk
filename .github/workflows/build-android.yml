@@ -1,0 +1,54 @@
+name: Build Android APK
+
+on:
+  push:
+    branches:
+      - main # یا هر برانچی که روش کار می‌کنی
+  workflow_dispatch: # برای اجرا کردن دستی بیلد از داخل گیتهاب
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ۱. دریافت کدها از ریپازیتوری
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ۲. نصب و تنظیم نود و جاوا
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm' # یا yarn / pnpm
+
+      - name: Setup Java JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      # ۳. نصب ابزار EAS CLI
+      - name: Setup Expo / EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      # ۴. نصب Dependency‌های پروژه
+      - name: Install dependencies
+        run: npm ci
+
+      # ۵. اجرای بیلد لوکال روی ورکر گیتهاب
+      - name: Build Android APK
+        run: npx eas-cli build --platform android --profile preview --local
+
+      # ۶. آپلود فایل APK خروجی به عنوان Artifact در گیتهاب
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release
+          path: '*.apk' # یا مسیر خروجی که EAS مشخص می‌کنه
