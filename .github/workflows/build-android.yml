@@ -11,60 +11,33 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Checkout
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
 
-      # Java
       - name: Setup Java JDK
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
 
-      # Android SDK
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      # نصب ابزارهای مورد نیاز اندروید
-      - name: Install Android packages
-        run: |
-          sdkmanager --install \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
-
-      # Expo / EAS
       - name: Setup Expo / EAS
         uses: expo/expo-github-action@v8
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
-      # Dependencies
       - name: Install dependencies
         run: npm ci
 
-      # Build APK
-      - name: Build Android APK
+      - name: Build Android APK on EAS servers
         run: |
-          npx eas-cli build \
+          eas build \
             --platform android \
             --profile preview \
-            --local \
             --non-interactive
-
-      # پیدا کردن APK و آپلود
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-release
-          path: |
-            **/*.apk
