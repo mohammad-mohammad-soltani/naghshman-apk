@@ -20,12 +20,6 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Setup Java JDK
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-
       - name: Setup Expo / EAS
         uses: expo/expo-github-action@v8
         with:
@@ -35,9 +29,30 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build Android APK on EAS servers
+      - name: Verify source
+        run: |
+          npm test
+          npm run lint
+          npm run typecheck
+
+      - name: Build Myket APK on EAS servers
+        id: eas-build
         run: |
           eas build \
             --platform android \
-            --profile preview \
-            --non-interactive
+            --profile myket \
+            --non-interactive \
+            --wait \
+            --json > eas-build.json
+          artifact_url="$(jq -er 'if type == "array" then .[0].artifacts.buildUrl else .artifacts.buildUrl end' eas-build.json)"
+          curl --fail --location --retry 3 "$artifact_url" --output naghshman-myket.apk
+
+      - name: Enforce 35–45 MiB APK budget
+        run: npm run check:apk-size -- naghshman-myket.apk
+
+      - name: Upload accepted Myket APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: naghshman-myket-apk
+          path: naghshman-myket.apk
+          if-no-files-found: error

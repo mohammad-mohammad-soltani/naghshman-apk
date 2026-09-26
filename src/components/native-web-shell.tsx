@@ -6,25 +6,32 @@ import * as SecureStore from 'expo-secure-store';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Linking,
   Platform,
-  Pressable,
   Share,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   WebView,
   type WebViewMessageEvent,
   type WebViewNavigation,
 } from 'react-native-webview';
 
+import { LaunchSplash } from '@/components/launch-splash';
 import {
   isAllowedWebUrl,
   parseNativeBridgeMessage,
 } from '@/lib/native-bridge';
+import {
+  INITIAL_WEB_SHELL_STATE,
+  reduceWebShellState,
+  shouldRetryInitialLoad,
+  type WebShellEvent,
+} from '@/lib/web-shell-state';
+import * as SplashScreen from 'expo-splash-screen';
 
 const APP_URL = 'https://naghshman.ir';
 const REFRESH_TOKEN_KEY = 'naghshman.refresh-token';
@@ -110,9 +117,12 @@ export function NativeWebShell() {
   const nativePlatform = Platform.OS === 'android' || Platform.OS === 'ios' ? Platform.OS : null;
   const webViewRef = useRef<WebView>(null);
   const restoreAttemptedToken = useRef<string | null>(null);
+  const initialAttemptHadError = useRef(false);
+  const mainDocumentUrl = useRef(APP_URL);
+  const shellStateRef = useRef(INITIAL_WEB_SHELL_STATE);
   const network = useNetworkState();
-  const [loadFailed, setLoadFailed] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [shellState, setShellState] = useState(INITIAL_WEB_SHELL_STATE);
+  const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [storedRefreshToken, setStoredRefreshToken] = useState<string | null | undefined>(
     nativePlatform ? undefined : null,
@@ -121,6 +131,12 @@ export function NativeWebShell() {
     () => nativePlatform ? nativeBootstrap(nativePlatform) : undefined,
     [nativePlatform],
   );
+
+  const dispatchShellEvent = useCallback((event: WebShellEvent) => {
+    const next = reduceWebShellState(shellStateRef.current, event);
+    shellStateRef.current = next;
+    setShellState(next);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -138,16 +154,19 @@ export function NativeWebShell() {
     return () => { active = false; };
   }, [nativePlatform]);
 
-  const offline =
-    network.isConnected === false ||
-    network.isInternetReachable === false ||
-    loadFailed;
+  useEffect(() => {
+    const online = !(
+      network.isConnected === false || network.isInternetReachable === false
+    );
+    const retry = shouldRetryInitialLoad(shellStateRef.current, online);
 
-  const reload = useCallback(() => {
-    setLoadFailed(false);
-    setLoading(true);
-    webViewRef.current?.reload();
-  }, []);
+    dispatchShellEvent({ type: 'network-changed', online });
+    if (retry) {
+      dispatchShellEvent({ type: 'retry-started' });
+      initialAttemptHadError.current = false;
+      webViewRef.current?.reload();
+    }
+  }, [dispatchShellEvent, network.isConnected, network.isInternetReachable]);
 
   const showNotice = useCallback((message: string) => {
     setNotice(message);
@@ -223,13 +242,36 @@ export function NativeWebShell() {
     `);
   }, [nativePlatform, storedRefreshToken]);
 
+  const handleLoadStart = useCallback((event: { nativeEvent: { url: string } }) => {
+    mainDocumentUrl.current = event.nativeEvent.url;
+    initialAttemptHadError.current = false;
+    if (shellStateRef.current.initialReady) setLoading(true);
+  }, []);
+
+  const handleLoad = useCallback(() => {
+    if (!initialAttemptHadError.current) {
+      dispatchShellEvent({ type: 'load-succeeded' });
+    }
+  }, [dispatchShellEvent]);
+
+  const handleInitialError = useCallback(() => {
+    initialAttemptHadError.current = true;
+    dispatchShellEvent({ type: 'load-failed' });
+  }, [dispatchShellEvent]);
+
+  const handleSplashMounted = useCallback(() => {
+    void SplashScreen.hideAsync().catch(() => {
+      // The overlay still protects first paint if the system splash already closed.
+    });
+  }, []);
+
   const shouldStartLoad = useCallback((request: WebViewNavigation) => {
     if (request.url === 'about:blank' || isAllowedWebUrl(request.url)) return true;
     void Linking.openURL(request.url);
     return false;
   }, []);
 
-  const webView = useMemo(() => (
+  const webView = (
     <WebView
       ref={webViewRef}
       source={{ uri: APP_URL }}
@@ -242,74 +284,53 @@ export function NativeWebShell() {
       thirdPartyCookiesEnabled
       cacheEnabled
       pullToRefreshEnabled={Platform.OS === 'android'}
-      startInLoadingState
       originWhitelist={['https://*']}
       onMessage={(event) => void handleMessage(event)}
       onShouldStartLoadWithRequest={shouldStartLoad}
-      onLoadStart={() => setLoading(true)}
+      onLoadStart={handleLoadStart}
+      onLoad={handleLoad}
       onLoadEnd={handleLoadEnd}
-      onError={() => setLoadFailed(true)}
+      onError={handleInitialError}
       onHttpError={(event) => {
-        if (event.nativeEvent.statusCode >= 500) setLoadFailed(true);
+        if (
+          event.nativeEvent.statusCode >= 500 &&
+          event.nativeEvent.url === mainDocumentUrl.current
+        ) {
+          handleInitialError();
+        }
       }}
-      renderLoading={() => <LoadingScreen />}
       style={styles.webView}
     />
-  ), [bootstrap, handleLoadEnd, handleMessage, nativePlatform, shouldStartLoad]);
-
-  if (offline) {
-    return <OfflineScreen onRetry={reload} />;
-  }
+  );
 
   return (
     <View style={styles.container}>
-      <StatusBar style="dark" />
-      {webView}
-      {loading ? <View pointerEvents="none" style={styles.loadingLine} /> : null}
-      {notice ? <View style={styles.notice}><Text style={styles.noticeText}>{notice}</Text></View> : null}
-    </View>
-  );
-}
-
-function LoadingScreen() {
-  return (
-    <View style={styles.loadingScreen}>
-      <ActivityIndicator color="#126c5a" size="large" />
-    </View>
-  );
-}
-
-function OfflineScreen({ onRetry }: { onRetry: () => void }) {
-  return (
-    <View style={styles.offlineContainer}>
-      <StatusBar style="dark" />
-      <View style={styles.offlineIcon}><Text style={styles.offlineIconText}>⌁</Text></View>
-      <Text style={styles.offlineEyebrow}>نقش من</Text>
-      <Text style={styles.offlineTitle}>به اینترنت متصل نیستید</Text>
-      <Text style={styles.offlineBody}>
-        شما نمی‌توانید به‌صورت آفلاین وارد این سایت شوید. پس از اتصال به اینترنت دوباره تلاش کنید.
-      </Text>
-      <Pressable accessibilityRole="button" onPress={onRetry} style={({ pressed }) => [styles.retryButton, pressed && styles.retryButtonPressed]}>
-        <Text style={styles.retryText}>تلاش دوباره</Text>
-      </Pressable>
+      <StatusBar style="light" />
+      <SafeAreaView edges={['top', 'bottom']} style={styles.safeArea}>
+        <View style={styles.webFrame}>
+          {webView}
+          {loading && shellState.initialReady ? (
+            <View pointerEvents="none" style={styles.loadingLine} />
+          ) : null}
+          {notice ? (
+            <View style={styles.notice}><Text style={styles.noticeText}>{notice}</Text></View>
+          ) : null}
+        </View>
+      </SafeAreaView>
+      <LaunchSplash
+        onMounted={handleSplashMounted}
+        visible={!shellState.initialReady}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fbfaf7' },
-  webView: { flex: 1, backgroundColor: '#fbfaf7' },
-  loadingLine: { position: 'absolute', top: 0, right: 0, left: 0, height: 3, backgroundColor: '#126c5a' },
-  loadingScreen: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fbfaf7' },
-  offlineContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#f7f5ee', paddingHorizontal: 32 },
-  offlineIcon: { width: 72, height: 72, alignItems: 'center', justifyContent: 'center', borderRadius: 24, backgroundColor: '#dcebe5', marginBottom: 24 },
-  offlineIconText: { color: '#126c5a', fontSize: 42, lineHeight: 48, fontFamily: 'Yekan' },
-  offlineEyebrow: { color: '#126c5a', fontSize: 15, fontFamily: 'Yekan', marginBottom: 10 },
-  offlineTitle: { color: '#1d2825', fontSize: 24, lineHeight: 38, fontFamily: 'Yekan', textAlign: 'center' },
-  offlineBody: { color: '#64716c', fontSize: 16, lineHeight: 30, fontFamily: 'Yekan', textAlign: 'center', marginTop: 14, maxWidth: 330 },
-  retryButton: { backgroundColor: '#126c5a', borderRadius: 16, minHeight: 52, justifyContent: 'center', paddingHorizontal: 28, marginTop: 28 },
-  retryButtonPressed: { opacity: 0.78, transform: [{ scale: 0.98 }] },
-  retryText: { color: '#ffffff', fontFamily: 'Yekan', fontSize: 16, textAlign: 'center' },
+  container: { flex: 1, backgroundColor: '#dc2626' },
+  safeArea: { flex: 1, backgroundColor: '#dc2626' },
+  webFrame: { flex: 1, backgroundColor: '#ffffff' },
+  webView: { flex: 1, backgroundColor: '#ffffff' },
+  loadingLine: { position: 'absolute', top: 0, right: 0, left: 0, height: 3, backgroundColor: '#dc2626' },
   notice: { position: 'absolute', bottom: 34, left: 20, right: 20, backgroundColor: '#1d2825', borderRadius: 14, paddingHorizontal: 16, paddingVertical: 12 },
   noticeText: { color: '#ffffff', fontFamily: 'Yekan', fontSize: 14, textAlign: 'center' },
 });
