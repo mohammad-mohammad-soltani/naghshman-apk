@@ -51,7 +51,8 @@
             "useLegacyPackaging": true,
             "gifEnabled": false,
             "webpEnabled": false,
-            "webpAnimated": false
+            "webpAnimated": false,
+            "releasePaddingMiB": 24
           }
         }
       ],

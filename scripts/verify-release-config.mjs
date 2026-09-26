@@ -38,6 +38,7 @@ test('configures an optimized arm64 release', () => {
   assert.equal(buildProperties.gifEnabled, false);
   assert.equal(buildProperties.webpEnabled, false);
   assert.equal(buildProperties.webpAnimated, false);
+  assert.equal(buildProperties.releasePaddingMiB, 24);
   assert.equal(app.android.package, 'ir.naghshman.app');
   assert.equal(Number.isInteger(app.android.versionCode) && app.android.versionCode > 0, true);
 });
