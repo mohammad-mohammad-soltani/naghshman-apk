@@ -17,7 +17,7 @@ test('configures the Meydan launcher and splash assets', () => {
   const splashPlugin = app.plugins.find(
     (plugin) => Array.isArray(plugin) && plugin[0] === 'expo-splash-screen',
   )?.[1];
-  assert.equal(splashPlugin.backgroundColor, '#dc2626');
+  assert.equal(splashPlugin.backgroundColor, '#c03636');
   assert.equal(splashPlugin.image, './assets/images/meydan-icon-foreground.png');
 
   for (const path of [

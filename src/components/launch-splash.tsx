@@ -4,6 +4,7 @@ import {
   Animated,
   Image,
   StyleSheet,
+  useWindowDimensions,
   View,
 } from 'react-native';
 
@@ -15,6 +16,8 @@ import {
 const DOT_IDLE_OPACITY = 0.4;
 const DOT_SIZE = 18;
 const FADE_DURATION_MS = 260;
+const ARTWORK_ASPECT_RATIO = 707 / 1536;
+const ARTWORK_BACKGROUND = '#c03636';
 
 type LaunchSplashProps = {
   visible: boolean;
@@ -22,6 +25,7 @@ type LaunchSplashProps = {
 };
 
 export function LaunchSplash({ visible, onMounted }: LaunchSplashProps) {
+  const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const mountedNotified = useRef(false);
   const [overlayOpacity] = useState(() => new Animated.Value(1));
   const [dotOpacities] = useState(() => [
@@ -92,6 +96,17 @@ export function LaunchSplash({ visible, onMounted }: LaunchSplashProps) {
 
   if (!rendered) return null;
 
+  const windowAspectRatio = windowWidth / windowHeight;
+  const artworkSize = windowAspectRatio > ARTWORK_ASPECT_RATIO
+    ? {
+        height: windowHeight,
+        width: windowHeight * ARTWORK_ASPECT_RATIO,
+      }
+    : {
+        height: windowWidth / ARTWORK_ASPECT_RATIO,
+        width: windowWidth,
+      };
+
   return (
     <Animated.View
       accessibilityElementsHidden
@@ -104,18 +119,20 @@ export function LaunchSplash({ visible, onMounted }: LaunchSplashProps) {
       pointerEvents={visible ? 'auto' : 'none'}
       style={[styles.overlay, { opacity: overlayOpacity }]}
     >
-      <Image
-        resizeMode="cover"
-        source={require('../../assets/images/splash-dotless.jpg')}
-        style={StyleSheet.absoluteFill}
-      />
-      <View style={styles.dots}>
-        {dotOpacities.map((opacity, index) => (
-          <Animated.View
-            key={index}
-            style={[styles.dot, { opacity }]}
-          />
-        ))}
+      <View style={[styles.artworkFrame, artworkSize]}>
+        <Image
+          resizeMode="contain"
+          source={require('../../assets/images/splash-dotless.jpg')}
+          style={StyleSheet.absoluteFill}
+        />
+        <View style={styles.dots}>
+          {dotOpacities.map((opacity, index) => (
+            <Animated.View
+              key={index}
+              style={[styles.dot, { opacity }]}
+            />
+          ))}
+        </View>
       </View>
     </Animated.View>
   );
@@ -125,8 +142,13 @@ const styles = StyleSheet.create({
   overlay: {
     position: 'absolute',
     inset: 0,
-    backgroundColor: '#dc2626',
+    backgroundColor: ARTWORK_BACKGROUND,
+    alignItems: 'center',
+    justifyContent: 'center',
     zIndex: 1000,
+  },
+  artworkFrame: {
+    position: 'relative',
   },
   dots: {
     position: 'absolute',
