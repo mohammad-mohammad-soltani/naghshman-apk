@@ -6,11 +6,11 @@ import { PNG } from 'pngjs';
 
 const root = new URL('../', import.meta.url);
 
-test('stretches the splash artwork across the overlay without a computed frame', () => {
+test('covers the screen with the portrait artwork without stretching its motif', () => {
   const source = readFileSync(new URL('src/components/launch-splash.tsx', root), 'utf8');
 
-  assert.match(source, /resizeMode="stretch"/);
-  assert.doesNotMatch(source, /resizeMode="cover"/);
+  assert.match(source, /resizeMode="cover"/);
+  assert.doesNotMatch(source, /resizeMode="stretch"/);
   assert.doesNotMatch(source, /useWindowDimensions/);
   assert.doesNotMatch(source, /artworkSize/);
   assert.match(source, /artwork:\s*\{[\s\S]*width:\s*'100%'[\s\S]*height:\s*'100%'/);

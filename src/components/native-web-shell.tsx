@@ -288,6 +288,7 @@ export function NativeWebShell() {
   const [loading, setLoading] = useState(false);
   const [splashGeneration, setSplashGeneration] = useState(0);
   const [splashOverlayMounted, setSplashOverlayMounted] = useState(true);
+  const [nativeSplashReleased, setNativeSplashReleased] = useState(false);
   const [safeAreaBackground, setSafeAreaBackground] =
     useState(LAUNCH_BACKGROUND);
   const [notice, setNotice] = useState<string | null>(null);
@@ -316,10 +317,16 @@ export function NativeWebShell() {
   const hideNativeSplash = useCallback(() => {
     if (hasHiddenNativeSplashRef.current) return;
     hasHiddenNativeSplashRef.current = true;
-    void SplashScreen.hideAsync().catch(() => {
-      // Allow the WebView's first successful load to retry if this handoff fails.
-      hasHiddenNativeSplashRef.current = false;
-    });
+    void SplashScreen.hideAsync()
+      .catch(() => {
+        // Some preview runtimes have no native splash to hide.
+        hasHiddenNativeSplashRef.current = false;
+      })
+      .finally(() => {
+        // Do not let the custom splash fade beneath the OS splash while
+        // the native handoff is still pending.
+        setNativeSplashReleased(true);
+      });
   }, []);
 
   const handleSplashHidden = useCallback(() => {
@@ -696,11 +703,11 @@ export function NativeWebShell() {
         isInitialWebDocument(event.nativeEvent.url)
       ) {
         dispatchShellEvent({ type: "load-succeeded" });
-        // Fallback if the image readiness event could not complete first.
-        hideNativeSplash();
+        // Only the full artwork's layout + image load can release the OS splash.
+        // Network success must not expose an undecoded or blank custom image.
       }
     },
-    [dispatchShellEvent, hideNativeSplash],
+    [dispatchShellEvent],
   );
 
   const handleInitialError = useCallback(() => {
@@ -731,8 +738,11 @@ export function NativeWebShell() {
     [nativePlatform],
   );
 
-  const launchSplashVisible =
-    isLaunchSplashVisible(shellState.initialReady) || loading;
+  const launchSplashVisible = isLaunchSplashVisible(
+    shellState.initialReady,
+    loading,
+    nativeSplashReleased,
+  );
   const displayedStatusBarBackground = splashOverlayMounted
     ? LAUNCH_BACKGROUND
     : safeAreaBackground;
