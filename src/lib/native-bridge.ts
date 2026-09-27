@@ -57,7 +57,7 @@ export function parseNativeBridgeMessage(value: string): NativeBridgeAction | nu
     return null;
   }
 
-  if (message.source !== NATIVE_BRIDGE_SOURCE || message.version !== NATIVE_BRIDGE_VERSION) {
+  if (!message || typeof message !== 'object' || message.source !== NATIVE_BRIDGE_SOURCE || message.version !== NATIVE_BRIDGE_VERSION) {
     return null;
   }
 

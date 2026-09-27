@@ -56,15 +56,15 @@ test('does not interrupt an existing successful document on connectivity loss', 
   assert.equal(shouldRetryFailedLoad(offline, true), false);
 });
 
-test('handles top-level server errors while ignoring sub-500 statuses', () => {
+test('keeps both client and server HTTP failures covered', () => {
   const ready = reduceWebShellState(INITIAL_WEB_SHELL_STATE, { type: 'load-succeeded' });
   assert.equal(
     reduceWebShellState(ready, { type: 'http-error', statusCode: 503 }).documentFailed,
     true,
   );
-  assert.deepEqual(
-    reduceWebShellState(ready, { type: 'http-error', statusCode: 404 }),
-    ready,
+  assert.equal(
+    reduceWebShellState(ready, { type: 'http-error', statusCode: 404 }).documentFailed,
+    true,
   );
 });
 

@@ -29,6 +29,8 @@
     },
     "plugins": [
       "expo-router",
+      "./plugins/with-launch-splash.cjs",
+      ["expo-navigation-bar", { "hidden": true }],
       [
         "expo-splash-screen",
         {

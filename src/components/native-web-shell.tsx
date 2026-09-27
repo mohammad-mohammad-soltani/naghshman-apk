@@ -1,5 +1,6 @@
 import * as Clipboard from "expo-clipboard";
 import Constants from "expo-constants";
+import { NavigationBar } from "expo-navigation-bar";
 import { File, Paths } from "expo-file-system";
 import { useNetworkState } from "expo-network";
 import * as SecureStore from "expo-secure-store";
@@ -21,6 +22,7 @@ import {
 } from "react-native-webview";
 
 import { LaunchSplash } from "@/components/launch-splash";
+import { isCurrentDocumentReady, webDocumentReadyScript } from "@/lib/web-document-ready";
 import { isInitialWebDocument } from "@/lib/initial-web-document";
 import { isLaunchSplashVisible } from "@/lib/launch-splash-visibility";
 import {
@@ -282,6 +284,7 @@ export function NativeWebShell() {
   const webViewDocumentReady = useRef(false);
   const initialAttemptHadError = useRef(false);
   const completedDocumentUrl = useRef<string | null>(null);
+  const loadAttempt = useRef(0);
   const mainDocumentUrl = useRef(APP_URL);
   const retryDelayMs = useRef(4000);
   const webViewProcessDead = useRef(false);
@@ -508,6 +511,7 @@ export function NativeWebShell() {
     ) return;
 
     dispatchShellEvent({ type: "retry-started" });
+    loadAttempt.current += 1;
     initialAttemptHadError.current = false;
     completedDocumentUrl.current = null;
     setLoading(true);
@@ -629,6 +633,17 @@ export function NativeWebShell() {
 
   const handleMessage = useCallback(
     async (event: WebViewMessageEvent) => {
+      try {
+        const message: unknown = JSON.parse(event.nativeEvent.data);
+        if (isCurrentDocumentReady(message, loadAttempt.current, completedDocumentUrl.current, initialAttemptHadError.current)) {
+          setLoading(false);
+          dispatchShellEvent({ type: "load-succeeded" });
+          retryDelayMs.current = 4000;
+          return;
+        }
+      } catch {
+        return;
+      }
       const action = parseNativeBridgeMessage(event.nativeEvent.data);
       if (!action) return;
 
@@ -673,7 +688,7 @@ export function NativeWebShell() {
           break;
       }
     },
-    [saveMedia, setNativeAuthentication, showNotice],
+    [dispatchShellEvent, saveMedia, setNativeAuthentication, showNotice],
   );
 
   const handleLoadEnd = useCallback(
@@ -685,8 +700,6 @@ export function NativeWebShell() {
         completedDocumentUrl.current !== event.nativeEvent.url
       ) return;
 
-      setLoading(false);
-      retryDelayMs.current = 4000;
       webViewDocumentReady.current = true;
       // The initial bootstrap can run before Next has applied its theme CSS.
       // Reading after document load makes the first safe-area color deterministic.
@@ -701,6 +714,8 @@ export function NativeWebShell() {
         );
         return;
       }
+
+      webViewRef.current?.injectJavaScript(webDocumentReadyScript(loadAttempt.current));
 
       if (
         !nativePlatform ||
@@ -730,6 +745,8 @@ export function NativeWebShell() {
     (event: { nativeEvent: { url: string } }) => {
       if (!isInitialWebDocument(event.nativeEvent.url)) return;
       mainDocumentUrl.current = event.nativeEvent.url;
+      loadAttempt.current += 1;
+      setLoading(true);
       webViewDocumentReady.current = false;
       completedDocumentUrl.current = null;
       initialAttemptHadError.current = false;
@@ -747,17 +764,18 @@ export function NativeWebShell() {
     (event: { nativeEvent: { url: string } }) => {
       if (
         !initialAttemptHadError.current &&
+        event.nativeEvent.url === mainDocumentUrl.current &&
         isInitialWebDocument(event.nativeEvent.url)
       ) {
         completedDocumentUrl.current = event.nativeEvent.url;
-        dispatchShellEvent({ type: "load-succeeded" });
         // Only the full artwork's layout + image load can release the OS splash.
       }
     },
-    [dispatchShellEvent],
+    [],
   );
 
   const handlePageFailure = useCallback(() => {
+    loadAttempt.current += 1;
     // Bring back a freshly mounted branded overlay if the previous one has
     // already faded out after a successful navigation.
     if (
@@ -773,6 +791,16 @@ export function NativeWebShell() {
     setSplashOverlayMounted(true);
     dispatchShellEvent({ type: "load-failed" });
   }, [dispatchShellEvent]);
+
+  // A stalled load or renderer must recover without ever revealing partial content.
+  useEffect(() => {
+    if (!initialWebUrl || shellState.documentFailed || (!loading && shellState.initialReady)) return;
+    const timer = setTimeout(() => {
+      handlePageFailure();
+      webViewRef.current?.stopLoading();
+    }, 45000);
+    return () => clearTimeout(timer);
+  }, [handlePageFailure, initialWebUrl, loading, shellState.documentFailed, shellState.initialReady, webViewGeneration]);
 
   const handleWebViewError = useCallback(
     (event: { nativeEvent: { url?: string }; preventDefault: () => void }) => {
@@ -816,9 +844,6 @@ export function NativeWebShell() {
     loading,
     nativeSplashReleased,
   ) || shellState.documentFailed;
-  const splashFailure = shellState.documentFailed
-    ? shellState.online ? "unavailable" : "offline"
-    : !shellState.initialReady && !shellState.online ? "offline" : null;
   const displayedStatusBarBackground = splashOverlayMounted
     ? LAUNCH_BACKGROUND
     : safeAreaBackground;
@@ -837,7 +862,8 @@ export function NativeWebShell() {
         sharedCookiesEnabled
         thirdPartyCookiesEnabled
         cacheEnabled
-        pullToRefreshEnabled={Platform.OS === "android"}
+        pullToRefreshEnabled={false}
+        renderLoading={() => <View style={styles.webViewErrorFallback} />}
         originWhitelist={["https://*"]}
         onMessage={(event) => void handleMessage(event)}
         onShouldStartLoadWithRequest={shouldStartLoad}
@@ -853,7 +879,7 @@ export function NativeWebShell() {
         renderError={() => <View style={styles.webViewErrorFallback} />}
         onHttpError={(event) => {
           if (
-            event.nativeEvent.statusCode >= 500 &&
+            event.nativeEvent.statusCode >= 400 &&
             event.nativeEvent.url === mainDocumentUrl.current
           ) {
             handlePageFailure();
@@ -874,9 +900,11 @@ export function NativeWebShell() {
   return (
     <View style={[styles.container, { backgroundColor: safeAreaBackground }]}>
       <StatusBar
+        hidden={splashOverlayMounted}
         backgroundColor={displayedStatusBarBackground}
         barStyle={splashOverlayMounted ? "light-content" : statusBarStyleFor(safeAreaBackground)}
       />
+      {Platform.OS === "android" && <NavigationBar hidden={splashOverlayMounted} />}
       <SafeAreaView
         edges={["top", "bottom"]}
         style={[styles.safeArea, { backgroundColor: safeAreaBackground }]}
@@ -890,8 +918,6 @@ export function NativeWebShell() {
         visible={launchSplashVisible}
         onReady={hideNativeSplash}
         onHidden={handleSplashHidden}
-        failure={splashFailure}
-        onRetry={retryFailedPage}
       />
     </View>
   );

@@ -3,9 +3,7 @@ import {
   AccessibilityInfo,
   Animated,
   Image,
-  Pressable,
   StyleSheet,
-  Text,
   View,
 } from 'react-native';
 
@@ -16,7 +14,6 @@ import {
 } from '@/lib/launch-splash-timing';
 
 const DOT_IDLE_OPACITY = 0.4;
-const DOT_SIZE = 18;
 const FADE_DURATION_MS = 260;
 const ARTWORK_BACKGROUND = '#c03636';
 
@@ -24,24 +21,19 @@ type LaunchSplashProps = {
   visible: boolean;
   onReady: () => void;
   onHidden?: () => void;
-  failure?: 'offline' | 'unavailable' | null;
-  onRetry?: () => void;
 };
 
 export function LaunchSplash({
   visible,
   onReady,
   onHidden,
-  failure = null,
-  onRetry,
 }: LaunchSplashProps) {
-  const [overlayOpacity] = useState(() => new Animated.Value(1));
   const [dotOpacities] = useState(() => [
     new Animated.Value(DOT_IDLE_OPACITY),
     new Animated.Value(DOT_IDLE_OPACITY),
     new Animated.Value(DOT_IDLE_OPACITY),
   ]);
-  const [rendered, setRendered] = useState(true);
+  const [size, setSize] = useState({ width: 0, height: 0 });
   const [artworkLaidOut, setArtworkLaidOut] = useState(false);
   const [artworkLoaded, setArtworkLoaded] = useState(false);
 
@@ -50,7 +42,7 @@ export function LaunchSplash({
   }, [artworkLaidOut, artworkLoaded, onReady]);
 
   useEffect(() => {
-    if (!visible || failure) return;
+    if (!visible) return;
 
     let active = true;
     let loop: Animated.CompositeAnimation | null = null;
@@ -81,7 +73,7 @@ export function LaunchSplash({
         ]),
       );
 
-      loop = Animated.loop(Animated.stagger(180, pulses));
+      loop = Animated.loop(Animated.sequence(pulses));
       loop.start();
     };
 
@@ -96,76 +88,47 @@ export function LaunchSplash({
       loop?.stop();
       subscription.remove();
     };
-  }, [dotOpacities, failure, visible]);
+  }, [dotOpacities, visible]);
 
   useEffect(() => {
-    // An interrupted fade must never notify the parent that a newer splash
-    // has disappeared (for example, during two rapid WebView navigations).
-    overlayOpacity.stopAnimation();
-    if (visible) {
-      overlayOpacity.setValue(1);
-      return;
-    }
+    if (!visible) onHidden?.();
+  }, [visible, onHidden]);
 
-    const fade = Animated.timing(overlayOpacity, {
-      toValue: 0,
-      duration: 240,
-      useNativeDriver: true,
-    });
-    fade.start(({ finished }) => {
-      if (finished) {
-        setRendered(false);
-        onHidden?.();
-      }
-    });
+  if (!visible) return null;
 
-    return () => fade.stop();
-  }, [overlayOpacity, visible, onHidden]);
-
-  if (!rendered) return null;
+  // Map the dots through the same centered cover transform as the artwork.
+  // Coordinates are measured from the supplied 880 x 1912 reference.
+  const scale = Math.max(size.width / 880, size.height / 1912);
+  const dotSize = 24 * scale;
+  const dotsLeft = (size.width - 880 * scale) / 2 + 380 * scale;
+  const dotsTop = (size.height - 1912 * scale) / 2 + 1768 * scale;
 
   return (
     <Animated.View
-      accessibilityElementsHidden={!failure}
-      importantForAccessibility={failure ? "auto" : "no-hide-descendants"}
+      accessible
+      accessibilityLabel="در حال بارگذاری"
+      accessibilityState={{ busy: true }}
       pointerEvents={visible ? 'auto' : 'none'}
-      onLayout={() => setArtworkLaidOut(true)}
-      style={[styles.overlay, { opacity: overlayOpacity }]}
+      onLayout={({ nativeEvent: { layout } }) => {
+        setSize({ width: layout.width, height: layout.height });
+        setArtworkLaidOut(true);
+      }}
+      style={styles.overlay}
     >
       <Image
         resizeMode="cover"
         source={require('../../assets/images/splash-dotless.jpg')}
-        onLoadEnd={() => setArtworkLoaded(true)}
+        onLoad={() => setArtworkLoaded(true)}
         style={styles.artwork}
       />
-      {failure ? (
-        <View style={styles.errorPanel} accessibilityLiveRegion="polite">
-          <Text style={styles.errorTitle}>
-            {failure === 'offline' ? 'اتصال اینترنت برقرار نیست' : 'بارگذاری صفحه ممکن نشد'}
-          </Text>
-          <Text style={styles.errorHint}>
-            {failure === 'offline'
-              ? 'پس از اتصال اینترنت، برنامه خودکار تلاش می‌کند.'
-              : 'اتصال اینترنت یا وضعیت سرور را بررسی کنید.'}
-          </Text>
-          <Pressable
-            accessibilityRole="button"
-            onPress={onRetry}
-            style={styles.retryButton}
-          >
-            <Text style={styles.retryText}>تلاش دوباره</Text>
-          </Pressable>
-        </View>
-      ) : (
-        <View style={styles.dots}>
+        <View style={[styles.dots, { left: dotsLeft, top: dotsTop, gap: 17 * scale }]}>
           {dotOpacities.map((opacity, index) => (
             <Animated.View
               key={index}
-              style={[styles.dot, { opacity }]}
+              style={[styles.dot, { opacity, width: dotSize, height: dotSize, borderRadius: dotSize / 2 }]}
             />
           ))}
         </View>
-      )}
     </Animated.View>
   );
 }
@@ -186,58 +149,11 @@ const styles = StyleSheet.create({
   },
   dots: {
     position: 'absolute',
-    bottom: '5.7%',
-    right: 0,
-    left: 0,
     flexDirection: 'row',
+    direction: 'ltr',
     justifyContent: 'center',
-    gap: 14,
   },
   dot: {
-    width: DOT_SIZE,
-    height: DOT_SIZE,
-    borderRadius: DOT_SIZE / 2,
     backgroundColor: '#ffffff',
-  },
-  errorPanel: {
-    position: 'absolute',
-    top: '67%',
-    alignSelf: 'center',
-    width: '84%',
-    maxWidth: 360,
-    paddingVertical: 18,
-    paddingHorizontal: 18,
-    borderRadius: 18,
-    alignItems: 'center',
-    backgroundColor: 'rgba(111, 24, 30, 0.92)',
-  },
-  errorTitle: {
-    color: '#ffffff',
-    fontFamily: 'Yekan',
-    fontSize: 18,
-    textAlign: 'center',
-  },
-  errorHint: {
-    color: '#f8e7e7',
-    fontFamily: 'Yekan',
-    fontSize: 14,
-    lineHeight: 24,
-    textAlign: 'center',
-    marginTop: 8,
-  },
-  retryButton: {
-    backgroundColor: '#ffffff',
-    borderRadius: 24,
-    paddingVertical: 9,
-    paddingHorizontal: 24,
-    marginTop: 16,
-    minHeight: 44,
-    justifyContent: 'center',
-  },
-  retryText: {
-    color: '#922529',
-    fontFamily: 'Yekan',
-    fontSize: 16,
-    textAlign: 'center',
   },
 });

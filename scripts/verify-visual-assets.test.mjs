@@ -85,7 +85,5 @@ test('replaces the WebView diagnostic page with a retryable branded overlay', ()
   assert.match(shell, /onError=\{handleWebViewError\}/);
   assert.match(shell, /completedDocumentUrl\.current !== event\.nativeEvent\.url/);
   assert.match(shell, /onRenderProcessGone/);
-  assert.match(shell, /onRetry=\{retryFailedPage\}/);
-  assert.match(splash, /تلاش دوباره/);
-  assert.match(splash, /اتصال اینترنت برقرار نیست/);
+  assert.doesNotMatch(splash, /errorPanel|Pressable|ActivityIndicator/);
 });

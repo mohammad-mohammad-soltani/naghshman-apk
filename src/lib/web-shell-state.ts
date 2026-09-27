@@ -43,7 +43,7 @@ export function reduceWebShellState(
         ? state
         : { ...state, initialFailed: false, documentFailed: false };
     case 'http-error':
-      return event.statusCode >= 500
+      return event.statusCode >= 400
         ? reduceWebShellState(state, { type: 'load-failed' })
         : state;
     case 'network-changed':
