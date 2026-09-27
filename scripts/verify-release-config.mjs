@@ -18,12 +18,13 @@ test('configures the Meydan launcher and splash assets', () => {
     (plugin) => Array.isArray(plugin) && plugin[0] === 'expo-splash-screen',
   )?.[1];
   assert.equal(splashPlugin.backgroundColor, '#c03636');
-  assert.equal(splashPlugin.image, './assets/images/meydan-icon-foreground.png');
+  assert.equal(splashPlugin.image, './assets/images/native-splash-map.png');
 
   for (const path of [
     '../assets/images/meydan-icon.png',
     '../assets/images/meydan-icon-foreground.png',
     '../assets/images/splash-dotless.jpg',
+    '../assets/images/native-splash-map.png',
   ]) {
     assert.equal(existsSync(new URL(path, import.meta.url)), true, `${path} must exist`);
   }

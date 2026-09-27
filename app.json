@@ -33,7 +33,7 @@
         "expo-splash-screen",
         {
           "backgroundColor": "#c03636",
-          "image": "./assets/images/meydan-icon-foreground.png",
+          "image": "./assets/images/native-splash-map.png",
           "imageWidth": 260,
           "resizeMode": "contain"
         }
