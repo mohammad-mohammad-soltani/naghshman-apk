@@ -126,7 +126,11 @@ function nativeBootstrap(
           window.location.replace('/');
           return;
         }
-        post({ type: 'clear-refresh' });
+        // Keep a valid device credential during upstream outages.
+        // Only a definite authentication failure revokes the local session.
+        if (response.status === 401 || response.status === 403) {
+          post({ type: 'clear-refresh' });
+        }
       } catch (error) {
         // Keep the credential for a future online retry.
       } finally {
@@ -271,6 +275,9 @@ export function NativeWebShell() {
   const canGoBackRef = useRef(false);
   const hasHiddenNativeSplashRef = useRef(false);
   const restoreAttemptedToken = useRef<string | null>(null);
+  // Synchronous guard avoids rejecting the first navigation before React
+  // commits the state change following SecureStore persistence.
+  const nativeAuthenticatedRef = useRef(!nativePlatform);
   const pendingNotificationRoute = useRef<string | null>(null);
   const webViewDocumentReady = useRef(false);
   const initialAttemptHadError = useRef(false);
@@ -316,10 +323,16 @@ export function NativeWebShell() {
 
     void SecureStore.getItemAsync(REFRESH_TOKEN_KEY)
       .then((token) => {
-        if (active) setStoredRefreshToken(token);
+        if (active) {
+          nativeAuthenticatedRef.current = Boolean(token);
+          setStoredRefreshToken(token);
+        }
       })
       .catch(() => {
-        if (active) setStoredRefreshToken(null);
+        if (active) {
+          nativeAuthenticatedRef.current = false;
+          setStoredRefreshToken(null);
+        }
       });
 
     return () => {
@@ -554,14 +567,24 @@ export function NativeWebShell() {
           await Linking.openURL(action.url);
           break;
         case "persist-refresh":
-          await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, action.token);
-          restoreAttemptedToken.current = null;
-          setStoredRefreshToken(action.token);
-          setNativeAuthentication(true);
+          try {
+            await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, action.token);
+            restoreAttemptedToken.current = null;
+            nativeAuthenticatedRef.current = true;
+            setStoredRefreshToken(action.token);
+            // This event doubles as the web login's persistence acknowledgement.
+            setNativeAuthentication(true);
+          } catch {
+            showNotice("ذخیره‌سازی ورود در گوشی انجام نشد. دوباره تلاش کنید.");
+            webViewRef.current?.injectJavaScript(
+              "window.dispatchEvent(new Event('naghshman:native-auth-error')); true;",
+            );
+          }
           break;
         case "clear-refresh":
           await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
           restoreAttemptedToken.current = null;
+          nativeAuthenticatedRef.current = false;
           setStoredRefreshToken(null);
           setNativeAuthentication(false);
           break;
@@ -648,7 +671,7 @@ export function NativeWebShell() {
     }
     if (
       nativePlatform &&
-      !nativeAuthenticated &&
+      !nativeAuthenticatedRef.current &&
       !shouldAllowNativeGuestNavigation(request.url, APP_URL)
     ) {
       webViewRef.current?.injectJavaScript("window.location.replace('/auth'); true;");
@@ -657,7 +680,7 @@ export function NativeWebShell() {
     if (isAllowedWebUrl(request.url))
       return true;
     return false;
-  }, [nativeAuthenticated, nativePlatform]);
+  }, [nativePlatform]);
 
   const webView = nativeAuthStateResolved && initialWebUrl ? (
     <WebView
