@@ -104,7 +104,6 @@ export function LaunchSplash({
     overlayOpacity.stopAnimation();
     if (visible) {
       overlayOpacity.setValue(1);
-      setRendered(true);
       return;
     }
 

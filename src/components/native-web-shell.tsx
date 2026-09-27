@@ -758,6 +758,14 @@ export function NativeWebShell() {
   );
 
   const handlePageFailure = useCallback(() => {
+    // Bring back a freshly mounted branded overlay if the previous one has
+    // already faded out after a successful navigation.
+    if (
+      shellStateRef.current.initialReady &&
+      !shellStateRef.current.documentFailed
+    ) {
+      setSplashGeneration((generation) => generation + 1);
+    }
     initialAttemptHadError.current = true;
     completedDocumentUrl.current = null;
     webViewDocumentReady.current = false;
