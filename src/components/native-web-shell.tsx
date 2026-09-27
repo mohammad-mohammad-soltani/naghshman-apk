@@ -2,9 +2,17 @@ import * as Clipboard from "expo-clipboard";
 import { File, Paths } from "expo-file-system";
 import { useNetworkState } from "expo-network";
 import * as SecureStore from "expo-secure-store";
-import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BackHandler, Linking, Platform, Share, StyleSheet, Text, View } from "react-native";
+import {
+  BackHandler,
+  Linking,
+  Platform,
+  Share,
+  StatusBar,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
   WebView,
@@ -13,20 +21,31 @@ import {
 } from "react-native-webview";
 
 import { LaunchSplash } from "@/components/launch-splash";
-import { isLaunchSplashVisible } from "@/lib/launch-splash-visibility";
 import { isInitialWebDocument } from "@/lib/initial-web-document";
+import { isLaunchSplashVisible } from "@/lib/launch-splash-visibility";
 import { isAllowedWebUrl, parseNativeBridgeMessage } from "@/lib/native-bridge";
-import { shouldHandleWebViewBack } from "@/lib/webview-back-navigation";
 import {
   INITIAL_WEB_SHELL_STATE,
   reduceWebShellState,
   shouldRetryInitialLoad,
   type WebShellEvent,
 } from "@/lib/web-shell-state";
+import { shouldHandleWebViewBack } from "@/lib/webview-back-navigation";
 import * as SplashScreen from "expo-splash-screen";
 
 const APP_URL = "https://naghshman.ir";
 const REFRESH_TOKEN_KEY = "naghshman.refresh-token";
+const BRAND_BACKGROUND = "#dc2626";
+
+function statusBarStyleFor(
+  backgroundColor: string,
+): "light-content" | "dark-content" {
+  const red = Number.parseInt(backgroundColor.slice(1, 3), 16);
+  const green = Number.parseInt(backgroundColor.slice(3, 5), 16);
+  const blue = Number.parseInt(backgroundColor.slice(5, 7), 16);
+  const luminance = (red * 299 + green * 587 + blue * 114) / 1000;
+  return luminance > 160 ? "dark-content" : "light-content";
+}
 
 function nativeBootstrap(platform: "android" | "ios") {
   return `
@@ -88,6 +107,27 @@ function nativeBootstrap(platform: "android" | "ios") {
       }
     });
     window.dispatchEvent(new Event('naghshman:native-ready'));
+    var lastBackground;
+    var reportBackground = function () {
+      var background = window.getComputedStyle(document.documentElement)
+        .getPropertyValue('--background').trim();
+      if (/^#[0-9a-f]{6}$/i.test(background) && background !== lastBackground) {
+        lastBackground = background;
+        post({ type: 'set-safe-area-background', color: background });
+      }
+    };
+    var scheduleBackgroundReport = function () {
+      if (typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(reportBackground);
+      } else {
+        window.setTimeout(reportBackground, 0);
+      }
+    };
+    scheduleBackgroundReport();
+    new MutationObserver(scheduleBackgroundReport).observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class', 'style']
+    });
     return true;
   })();
 `;
@@ -121,6 +161,7 @@ export function NativeWebShell() {
   const network = useNetworkState();
   const [shellState, setShellState] = useState(INITIAL_WEB_SHELL_STATE);
   const [loading, setLoading] = useState(false);
+  const [safeAreaBackground, setSafeAreaBackground] = useState(BRAND_BACKGROUND);
   const [notice, setNotice] = useState<string | null>(null);
   const [storedRefreshToken, setStoredRefreshToken] = useState<
     string | null | undefined
@@ -160,11 +201,14 @@ export function NativeWebShell() {
   useEffect(() => {
     if (Platform.OS !== "android") return;
 
-    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (!shouldHandleWebViewBack(canGoBackRef.current)) return false;
-      webViewRef.current?.goBack();
-      return true;
-    });
+    const subscription = BackHandler.addEventListener(
+      "hardwareBackPress",
+      () => {
+        if (!shouldHandleWebViewBack(canGoBackRef.current)) return false;
+        webViewRef.current?.goBack();
+        return true;
+      },
+    );
 
     return () => subscription.remove();
   }, []);
@@ -227,6 +271,9 @@ export function NativeWebShell() {
       if (!action) return;
 
       switch (action.type) {
+        case "set-safe-area-background":
+          setSafeAreaBackground(action.color);
+          break;
         case "save-media":
           await saveMedia(action.url, action.filename);
           break;
@@ -287,20 +334,23 @@ export function NativeWebShell() {
     [],
   );
 
-  const handleLoad = useCallback((event: { nativeEvent: { url: string } }) => {
-    if (
-      !initialAttemptHadError.current &&
-      isInitialWebDocument(event.nativeEvent.url)
-    ) {
-      dispatchShellEvent({ type: "load-succeeded" });
-      if (!hasHiddenNativeSplashRef.current) {
-        hasHiddenNativeSplashRef.current = true;
-        void SplashScreen.hideAsync().catch(() => {
-          // The custom overlay remains visible until this first successful load.
-        });
+  const handleLoad = useCallback(
+    (event: { nativeEvent: { url: string } }) => {
+      if (
+        !initialAttemptHadError.current &&
+        isInitialWebDocument(event.nativeEvent.url)
+      ) {
+        dispatchShellEvent({ type: "load-succeeded" });
+        if (!hasHiddenNativeSplashRef.current) {
+          hasHiddenNativeSplashRef.current = true;
+          void SplashScreen.hideAsync().catch(() => {
+            // The custom overlay remains visible until this first successful load.
+          });
+        }
       }
-    }
-  }, [dispatchShellEvent]);
+    },
+    [dispatchShellEvent],
+  );
 
   const handleInitialError = useCallback(() => {
     initialAttemptHadError.current = true;
@@ -349,9 +399,15 @@ export function NativeWebShell() {
   );
 
   return (
-    <View style={styles.container}>
-      <StatusBar style="light" />
-      <SafeAreaView edges={["top", "bottom"]} style={styles.safeArea}>
+    <View style={[styles.container, { backgroundColor: safeAreaBackground }]}>
+      <StatusBar
+        backgroundColor={safeAreaBackground}
+        barStyle={statusBarStyleFor(safeAreaBackground)}
+      />
+      <SafeAreaView
+        edges={["top", "bottom"]}
+        style={[styles.safeArea, { backgroundColor: safeAreaBackground }]}
+      >
         <View style={styles.webFrame}>
           {webView}
           {loading && shellState.initialReady ? (
@@ -364,16 +420,14 @@ export function NativeWebShell() {
           ) : null}
         </View>
       </SafeAreaView>
-      <LaunchSplash
-        visible={isLaunchSplashVisible(shellState.initialReady)}
-      />
+      <LaunchSplash visible={isLaunchSplashVisible(shellState.initialReady)} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#dc2626" },
-  safeArea: { flex: 1, backgroundColor: "#dc2626" },
+  container: { flex: 1 },
+  safeArea: { flex: 1 },
   webFrame: { flex: 1, backgroundColor: "#ffffff" },
   webView: { flex: 1, backgroundColor: "#ffffff" },
   loadingLine: {

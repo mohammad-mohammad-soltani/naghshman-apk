@@ -8,6 +8,7 @@ const ALLOWED_HOSTS = new Set([
 ]);
 
 export type NativeBridgeAction =
+  | { type: 'set-safe-area-background'; color: string }
   | { type: 'save-media'; url: string; filename?: string }
   | { type: 'share'; url: string; title?: string }
   | { type: 'copy-link'; url: string }
@@ -19,6 +20,7 @@ type BridgeEnvelope = {
   source?: unknown;
   version?: unknown;
   type?: unknown;
+  color?: unknown;
   url?: unknown;
   filename?: unknown;
   title?: unknown;
@@ -36,6 +38,10 @@ export function isAllowedWebUrl(value: string): boolean {
 
 function optionalText(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim().slice(0, 180) : undefined;
+}
+
+function isOpaqueHexColor(value: unknown): value is string {
+  return typeof value === 'string' && /^#[\da-f]{6}$/iu.test(value);
 }
 
 /**
@@ -56,6 +62,12 @@ export function parseNativeBridgeMessage(value: string): NativeBridgeAction | nu
   }
 
   if (message.type === 'clear-refresh') return { type: 'clear-refresh' };
+
+  if (message.type === 'set-safe-area-background') {
+    return isOpaqueHexColor(message.color)
+      ? { type: 'set-safe-area-background', color: message.color }
+      : null;
+  }
 
   if (message.type === 'persist-refresh') {
     return typeof message.token === 'string' && /^ref_[A-Za-z0-9_-]{20,512}$/.test(message.token)

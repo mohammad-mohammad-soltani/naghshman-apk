@@ -48,6 +48,21 @@ test('accepts a device refresh credential only with the expected token shape', (
   );
 });
 
+test('accepts only an opaque hex safe-area background', () => {
+  const valid = JSON.stringify({
+    source: 'naghshman-web',
+    version: 1,
+    type: 'set-safe-area-background',
+    color: '#1f1f1f',
+  });
+
+  assert.deepEqual(parseNativeBridgeMessage(valid), {
+    type: 'set-safe-area-background',
+    color: '#1f1f1f',
+  });
+  assert.equal(parseNativeBridgeMessage(valid.replace('#1f1f1f', 'rgb(0, 0, 0)')), null);
+});
+
 test('rejects forged, malformed, and unsafe bridge requests', () => {
   assert.equal(parseNativeBridgeMessage('not json'), null);
   assert.equal(
