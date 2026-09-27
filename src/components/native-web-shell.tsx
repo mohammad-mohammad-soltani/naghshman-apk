@@ -36,7 +36,7 @@ import {
 import {
   INITIAL_WEB_SHELL_STATE,
   reduceWebShellState,
-  shouldRetryInitialLoad,
+  shouldRetryFailedLoad,
   type WebShellEvent,
 } from "@/lib/web-shell-state";
 import { shouldHandleWebViewBack } from "@/lib/webview-back-navigation";
@@ -281,11 +281,15 @@ export function NativeWebShell() {
   const pendingNotificationRoute = useRef<string | null>(null);
   const webViewDocumentReady = useRef(false);
   const initialAttemptHadError = useRef(false);
+  const completedDocumentUrl = useRef<string | null>(null);
   const mainDocumentUrl = useRef(APP_URL);
+  const retryDelayMs = useRef(4000);
+  const webViewProcessDead = useRef(false);
   const shellStateRef = useRef(INITIAL_WEB_SHELL_STATE);
   const network = useNetworkState();
   const [shellState, setShellState] = useState(INITIAL_WEB_SHELL_STATE);
   const [loading, setLoading] = useState(false);
+  const [webViewGeneration, setWebViewGeneration] = useState(0);
   const [splashGeneration, setSplashGeneration] = useState(0);
   const [splashOverlayMounted, setSplashOverlayMounted] = useState(true);
   const [nativeSplashReleased, setNativeSplashReleased] = useState(false);
@@ -495,19 +499,52 @@ export function NativeWebShell() {
     return () => subscription.remove();
   }, []);
 
+  const retryFailedPage = useCallback(() => {
+    // A manual retry is also allowed if the OS has detected an offline first
+    // launch before WebView has emitted its failure event.
+    if (
+      !shellStateRef.current.documentFailed &&
+      shellStateRef.current.initialReady
+    ) return;
+
+    dispatchShellEvent({ type: "retry-started" });
+    initialAttemptHadError.current = false;
+    completedDocumentUrl.current = null;
+    setLoading(true);
+
+    if (webViewProcessDead.current) {
+      webViewProcessDead.current = false;
+      setWebViewGeneration((generation) => generation + 1);
+    } else {
+      webViewRef.current?.reload();
+    }
+  }, [dispatchShellEvent]);
+
   useEffect(() => {
     const online = !(
       network.isConnected === false || network.isInternetReachable === false
     );
-    const retry = shouldRetryInitialLoad(shellStateRef.current, online);
+    const retry = shouldRetryFailedLoad(shellStateRef.current, online);
 
     dispatchShellEvent({ type: "network-changed", online });
-    if (retry) {
-      dispatchShellEvent({ type: "retry-started" });
-      initialAttemptHadError.current = false;
-      webViewRef.current?.reload();
-    }
-  }, [dispatchShellEvent, network.isConnected, network.isInternetReachable]);
+    if (retry) retryFailedPage();
+  }, [
+    dispatchShellEvent,
+    network.isConnected,
+    network.isInternetReachable,
+    retryFailedPage,
+  ]);
+
+  // A server can recover without the OS reporting any connectivity change.
+  // Retry online failures with capped backoff, while leaving healthy pages alone.
+  useEffect(() => {
+    if (!shellState.documentFailed || !shellState.online) return;
+
+    const delay = retryDelayMs.current;
+    retryDelayMs.current = Math.min(delay * 2, 30000);
+    const timer = setTimeout(retryFailedPage, delay);
+    return () => clearTimeout(timer);
+  }, [retryFailedPage, shellState.documentFailed, shellState.online]);
 
   const showNotice = useCallback((message: string) => {
     setNotice(message);
@@ -641,7 +678,15 @@ export function NativeWebShell() {
 
   const handleLoadEnd = useCallback(
     (event: { nativeEvent: { url: string } }) => {
+      // onLoadEnd fires for failures too. Do not expose WebView's native
+      // "Error loading page" screen or run session restoration on a failed load.
+      if (
+        initialAttemptHadError.current ||
+        completedDocumentUrl.current !== event.nativeEvent.url
+      ) return;
+
       setLoading(false);
+      retryDelayMs.current = 4000;
       webViewDocumentReady.current = true;
       // The initial bootstrap can run before Next has applied its theme CSS.
       // Reading after document load makes the first safe-area color deterministic.
@@ -683,8 +728,10 @@ export function NativeWebShell() {
 
   const handleLoadStart = useCallback(
     (event: { nativeEvent: { url: string } }) => {
+      if (!isInitialWebDocument(event.nativeEvent.url)) return;
       mainDocumentUrl.current = event.nativeEvent.url;
       webViewDocumentReady.current = false;
+      completedDocumentUrl.current = null;
       initialAttemptHadError.current = false;
       if (shellStateRef.current.initialReady) {
         // Full-document navigation uses the same loader, not a second top bar.
@@ -702,18 +749,36 @@ export function NativeWebShell() {
         !initialAttemptHadError.current &&
         isInitialWebDocument(event.nativeEvent.url)
       ) {
+        completedDocumentUrl.current = event.nativeEvent.url;
         dispatchShellEvent({ type: "load-succeeded" });
         // Only the full artwork's layout + image load can release the OS splash.
-        // Network success must not expose an undecoded or blank custom image.
       }
     },
     [dispatchShellEvent],
   );
 
-  const handleInitialError = useCallback(() => {
+  const handlePageFailure = useCallback(() => {
     initialAttemptHadError.current = true;
+    completedDocumentUrl.current = null;
+    webViewDocumentReady.current = false;
+    setLoading(false);
+    setSplashOverlayMounted(true);
     dispatchShellEvent({ type: "load-failed" });
   }, [dispatchShellEvent]);
+
+  const handleWebViewError = useCallback(
+    (event: { nativeEvent: { url?: string }; preventDefault: () => void }) => {
+      const failedUrl = event.nativeEvent.url;
+      // Cancellation of an earlier redirected navigation is not a failure of
+      // the new top-level document (and must not replace its loading screen).
+      if (failedUrl && failedUrl !== mainDocumentUrl.current) {
+        event.preventDefault();
+        return;
+      }
+      handlePageFailure();
+    },
+    [handlePageFailure],
+  );
 
   const shouldStartLoad = useCallback(
     (request: WebViewNavigation) => {
@@ -742,7 +807,10 @@ export function NativeWebShell() {
     shellState.initialReady,
     loading,
     nativeSplashReleased,
-  );
+  ) || shellState.documentFailed;
+  const splashFailure = shellState.documentFailed
+    ? shellState.online ? "unavailable" : "offline"
+    : !shellState.initialReady && !shellState.online ? "offline" : null;
   const displayedStatusBarBackground = splashOverlayMounted
     ? LAUNCH_BACKGROUND
     : safeAreaBackground;
@@ -750,6 +818,7 @@ export function NativeWebShell() {
   const webView =
     nativeAuthStateResolved && initialWebUrl ? (
       <WebView
+        key={webViewGeneration}
         ref={webViewRef}
         source={{ uri: initialWebUrl }}
         applicationNameForUserAgent="NaghshmanNative/1"
@@ -770,14 +839,25 @@ export function NativeWebShell() {
         onLoadStart={handleLoadStart}
         onLoad={handleLoad}
         onLoadEnd={handleLoadEnd}
-        onError={handleInitialError}
+        onError={handleWebViewError}
+        // Replace react-native-webview's white diagnostic error screen.
+        // The full-screen branded overlay supplies the recovery UI.
+        renderError={() => <View style={styles.webViewErrorFallback} />}
         onHttpError={(event) => {
           if (
             event.nativeEvent.statusCode >= 500 &&
             event.nativeEvent.url === mainDocumentUrl.current
           ) {
-            handleInitialError();
+            handlePageFailure();
           }
+        }}
+        onRenderProcessGone={() => {
+          webViewProcessDead.current = true;
+          handlePageFailure();
+        }}
+        onContentProcessDidTerminate={() => {
+          webViewProcessDead.current = true;
+          handlePageFailure();
         }}
         style={styles.webView}
       />
@@ -802,6 +882,8 @@ export function NativeWebShell() {
         visible={launchSplashVisible}
         onReady={hideNativeSplash}
         onHidden={handleSplashHidden}
+        failure={splashFailure}
+        onRetry={retryFailedPage}
       />
     </View>
   );
@@ -812,6 +894,7 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1 },
   webFrame: { flex: 1, backgroundColor: "#ffffff" },
   webView: { flex: 1, backgroundColor: "#ffffff" },
+  webViewErrorFallback: { flex: 1, backgroundColor: LAUNCH_BACKGROUND },
   notice: {
     position: "absolute",
     bottom: 34,

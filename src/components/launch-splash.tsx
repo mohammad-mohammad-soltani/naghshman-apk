@@ -3,7 +3,9 @@ import {
   AccessibilityInfo,
   Animated,
   Image,
+  Pressable,
   StyleSheet,
+  Text,
   View,
 } from 'react-native';
 
@@ -22,9 +24,17 @@ type LaunchSplashProps = {
   visible: boolean;
   onReady: () => void;
   onHidden?: () => void;
+  failure?: 'offline' | 'unavailable' | null;
+  onRetry?: () => void;
 };
 
-export function LaunchSplash({ visible, onReady, onHidden }: LaunchSplashProps) {
+export function LaunchSplash({
+  visible,
+  onReady,
+  onHidden,
+  failure = null,
+  onRetry,
+}: LaunchSplashProps) {
   const [overlayOpacity] = useState(() => new Animated.Value(1));
   const [dotOpacities] = useState(() => [
     new Animated.Value(DOT_IDLE_OPACITY),
@@ -40,7 +50,7 @@ export function LaunchSplash({ visible, onReady, onHidden }: LaunchSplashProps) 
   }, [artworkLaidOut, artworkLoaded, onReady]);
 
   useEffect(() => {
-    if (!visible) return;
+    if (!visible || failure) return;
 
     let active = true;
     let loop: Animated.CompositeAnimation | null = null;
@@ -86,7 +96,7 @@ export function LaunchSplash({ visible, onReady, onHidden }: LaunchSplashProps) 
       loop?.stop();
       subscription.remove();
     };
-  }, [dotOpacities, visible]);
+  }, [dotOpacities, failure, visible]);
 
   useEffect(() => {
     // An interrupted fade must never notify the parent that a newer splash
@@ -94,6 +104,7 @@ export function LaunchSplash({ visible, onReady, onHidden }: LaunchSplashProps) 
     overlayOpacity.stopAnimation();
     if (visible) {
       overlayOpacity.setValue(1);
+      setRendered(true);
       return;
     }
 
@@ -116,8 +127,8 @@ export function LaunchSplash({ visible, onReady, onHidden }: LaunchSplashProps) 
 
   return (
     <Animated.View
-      accessibilityElementsHidden
-      importantForAccessibility="no-hide-descendants"
+      accessibilityElementsHidden={!failure}
+      importantForAccessibility={failure ? "auto" : "no-hide-descendants"}
       pointerEvents={visible ? 'auto' : 'none'}
       onLayout={() => setArtworkLaidOut(true)}
       style={[styles.overlay, { opacity: overlayOpacity }]}
@@ -128,14 +139,34 @@ export function LaunchSplash({ visible, onReady, onHidden }: LaunchSplashProps) 
         onLoadEnd={() => setArtworkLoaded(true)}
         style={styles.artwork}
       />
-      <View style={styles.dots}>
-        {dotOpacities.map((opacity, index) => (
-          <Animated.View
-            key={index}
-            style={[styles.dot, { opacity }]}
-          />
-        ))}
-      </View>
+      {failure ? (
+        <View style={styles.errorPanel} accessibilityLiveRegion="polite">
+          <Text style={styles.errorTitle}>
+            {failure === 'offline' ? 'اتصال اینترنت برقرار نیست' : 'بارگذاری صفحه ممکن نشد'}
+          </Text>
+          <Text style={styles.errorHint}>
+            {failure === 'offline'
+              ? 'پس از اتصال اینترنت، برنامه خودکار تلاش می‌کند.'
+              : 'اتصال اینترنت یا وضعیت سرور را بررسی کنید.'}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            onPress={onRetry}
+            style={styles.retryButton}
+          >
+            <Text style={styles.retryText}>تلاش دوباره</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <View style={styles.dots}>
+          {dotOpacities.map((opacity, index) => (
+            <Animated.View
+              key={index}
+              style={[styles.dot, { opacity }]}
+            />
+          ))}
+        </View>
+      )}
     </Animated.View>
   );
 }
@@ -168,5 +199,46 @@ const styles = StyleSheet.create({
     height: DOT_SIZE,
     borderRadius: DOT_SIZE / 2,
     backgroundColor: '#ffffff',
+  },
+  errorPanel: {
+    position: 'absolute',
+    top: '67%',
+    alignSelf: 'center',
+    width: '84%',
+    maxWidth: 360,
+    paddingVertical: 18,
+    paddingHorizontal: 18,
+    borderRadius: 18,
+    alignItems: 'center',
+    backgroundColor: 'rgba(111, 24, 30, 0.92)',
+  },
+  errorTitle: {
+    color: '#ffffff',
+    fontFamily: 'Yekan',
+    fontSize: 18,
+    textAlign: 'center',
+  },
+  errorHint: {
+    color: '#f8e7e7',
+    fontFamily: 'Yekan',
+    fontSize: 14,
+    lineHeight: 24,
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  retryButton: {
+    backgroundColor: '#ffffff',
+    borderRadius: 24,
+    paddingVertical: 9,
+    paddingHorizontal: 24,
+    marginTop: 16,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  retryText: {
+    color: '#922529',
+    fontFamily: 'Yekan',
+    fontSize: 16,
+    textAlign: 'center',
   },
 });

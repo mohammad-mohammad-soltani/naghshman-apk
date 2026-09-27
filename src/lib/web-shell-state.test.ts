@@ -4,64 +4,75 @@ import test from 'node:test';
 import {
   INITIAL_WEB_SHELL_STATE,
   reduceWebShellState,
-  shouldRetryInitialLoad,
+  shouldRetryFailedLoad,
 } from './web-shell-state.ts';
 
-test('marks the first successful document ready and never shows launch state again', () => {
-  const ready = reduceWebShellState(INITIAL_WEB_SHELL_STATE, { type: 'load-succeeded' });
-  assert.deepEqual(ready, { initialReady: true, initialFailed: false, online: true });
-
-  const laterFailure = reduceWebShellState(ready, { type: 'load-failed' });
-  assert.deepEqual(laterFailure, ready);
-});
-
-test('records an initial failure without discarding the shell', () => {
+test('marks the first successful document ready and clears recovery state', () => {
   const failed = reduceWebShellState(INITIAL_WEB_SHELL_STATE, { type: 'load-failed' });
-  assert.deepEqual(failed, { initialReady: false, initialFailed: true, online: true });
+  const ready = reduceWebShellState(failed, { type: 'load-succeeded' });
+  assert.deepEqual(ready, {
+    initialReady: true,
+    initialFailed: false,
+    documentFailed: false,
+    online: true,
+  });
 });
 
-test('retries a failed initial load only when connectivity returns', () => {
-  const failedOffline = {
-    initialReady: false,
-    initialFailed: true,
+test('keeps a later failed navigation hidden even after initial readiness', () => {
+  const ready = reduceWebShellState(INITIAL_WEB_SHELL_STATE, { type: 'load-succeeded' });
+  const failure = reduceWebShellState(ready, { type: 'load-failed' });
+  assert.equal(failure.initialReady, true);
+  assert.equal(failure.initialFailed, false);
+  assert.equal(failure.documentFailed, true);
+  assert.equal(reduceWebShellState(failure, { type: 'retry-started' }).documentFailed, false);
+  assert.equal(reduceWebShellState(failure, { type: 'load-succeeded' }).documentFailed, false);
+});
+
+test('retries initial and later failures when connectivity is restored', () => {
+  const failedInitial = reduceWebShellState(INITIAL_WEB_SHELL_STATE, { type: 'load-failed' });
+  const offlineInitial = reduceWebShellState(failedInitial, {
+    type: 'network-changed',
     online: false,
-  };
-
-  assert.equal(shouldRetryInitialLoad(failedOffline, true), true);
-  assert.equal(shouldRetryInitialLoad(failedOffline, false), false);
-  assert.equal(shouldRetryInitialLoad(INITIAL_WEB_SHELL_STATE, true), false);
-
-  assert.deepEqual(
-    reduceWebShellState(failedOffline, { type: 'retry-started' }),
-    { initialReady: false, initialFailed: false, online: false },
+  });
+  const ready = reduceWebShellState(INITIAL_WEB_SHELL_STATE, { type: 'load-succeeded' });
+  const offlineLater = reduceWebShellState(
+    reduceWebShellState(ready, { type: 'load-failed' }),
+    { type: 'network-changed', online: false },
   );
+
+  assert.equal(shouldRetryFailedLoad(offlineInitial, true), true);
+  assert.equal(shouldRetryFailedLoad(offlineLater, true), true);
+  assert.equal(shouldRetryFailedLoad(offlineLater, false), false);
+  assert.equal(shouldRetryFailedLoad(INITIAL_WEB_SHELL_STATE, true), false);
+  assert.equal(shouldRetryFailedLoad(ready, true), false);
 });
 
-test('keeps a loaded document ready while offline', () => {
+test('does not interrupt an existing successful document on connectivity loss', () => {
   const ready = reduceWebShellState(INITIAL_WEB_SHELL_STATE, { type: 'load-succeeded' });
   const offline = reduceWebShellState(ready, { type: 'network-changed', online: false });
 
-  assert.deepEqual(offline, { initialReady: true, initialFailed: false, online: false });
-  assert.equal(shouldRetryInitialLoad(offline, true), false);
+  assert.equal(offline.initialReady, true);
+  assert.equal(offline.documentFailed, false);
+  assert.equal(shouldRetryFailedLoad(offline, true), false);
 });
 
-test('ignores later server errors after initial readiness', () => {
+test('handles top-level server errors while ignoring sub-500 statuses', () => {
   const ready = reduceWebShellState(INITIAL_WEB_SHELL_STATE, { type: 'load-succeeded' });
-  const afterServerError = reduceWebShellState(ready, { type: 'http-error', statusCode: 503 });
-
-  assert.deepEqual(afterServerError, ready);
+  assert.equal(
+    reduceWebShellState(ready, { type: 'http-error', statusCode: 503 }).documentFailed,
+    true,
+  );
+  assert.deepEqual(
+    reduceWebShellState(ready, { type: 'http-error', statusCode: 404 }),
+    ready,
+  );
 });
 
-test('treats an initial top-level server error as a failed load', () => {
-  const failed = reduceWebShellState(INITIAL_WEB_SHELL_STATE, {
-    type: 'http-error',
-    statusCode: 500,
-  });
-  const ignoredClientError = reduceWebShellState(INITIAL_WEB_SHELL_STATE, {
-    type: 'http-error',
-    statusCode: 404,
-  });
+test('clears a failure on retry without discarding the first successful document', () => {
+  const ready = reduceWebShellState(INITIAL_WEB_SHELL_STATE, { type: 'load-succeeded' });
+  const failed = reduceWebShellState(ready, { type: 'load-failed' });
+  const retry = reduceWebShellState(failed, { type: 'retry-started' });
 
-  assert.equal(failed.initialFailed, true);
-  assert.deepEqual(ignoredClientError, INITIAL_WEB_SHELL_STATE);
+  assert.equal(retry.documentFailed, false);
+  assert.equal(retry.initialReady, true);
 });
