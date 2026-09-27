@@ -45,6 +45,7 @@ import * as SplashScreen from "expo-splash-screen";
 const APP_URL = "https://naghshman.ir";
 const REFRESH_TOKEN_KEY = "naghshman.refresh-token";
 const BRAND_BACKGROUND = "#dc2626";
+const LAUNCH_BACKGROUND = "#c03636";
 
 type NotificationsModule = typeof import("expo-notifications");
 
@@ -285,8 +286,10 @@ export function NativeWebShell() {
   const network = useNetworkState();
   const [shellState, setShellState] = useState(INITIAL_WEB_SHELL_STATE);
   const [loading, setLoading] = useState(false);
+  const [splashGeneration, setSplashGeneration] = useState(0);
+  const [splashOverlayMounted, setSplashOverlayMounted] = useState(true);
   const [safeAreaBackground, setSafeAreaBackground] =
-    useState(BRAND_BACKGROUND);
+    useState(LAUNCH_BACKGROUND);
   const [notice, setNotice] = useState<string | null>(null);
   const [storedRefreshToken, setStoredRefreshToken] = useState<
     string | null | undefined
@@ -307,6 +310,21 @@ export function NativeWebShell() {
         : undefined,
     [nativeAuthenticated, nativePlatform],
   );
+
+  // The platform splash is only a bridge until React Native can draw the
+  // identical branded artwork and animated dots. Never wait for the network.
+  const hideNativeSplash = useCallback(() => {
+    if (hasHiddenNativeSplashRef.current) return;
+    hasHiddenNativeSplashRef.current = true;
+    void SplashScreen.hideAsync().catch(() => {
+      // Allow the WebView's first successful load to retry if this handoff fails.
+      hasHiddenNativeSplashRef.current = false;
+    });
+  }, []);
+
+  const handleSplashHidden = useCallback(() => {
+    setSplashOverlayMounted(false);
+  }, []);
 
   const dispatchShellEvent = useCallback((event: WebShellEvent) => {
     const next = reduceWebShellState(shellStateRef.current, event);
@@ -661,7 +679,12 @@ export function NativeWebShell() {
       mainDocumentUrl.current = event.nativeEvent.url;
       webViewDocumentReady.current = false;
       initialAttemptHadError.current = false;
-      if (shellStateRef.current.initialReady) setLoading(true);
+      if (shellStateRef.current.initialReady) {
+        // Full-document navigation uses the same loader, not a second top bar.
+        setLoading(true);
+        setSplashGeneration((generation) => generation + 1);
+        setSplashOverlayMounted(true);
+      }
     },
     [],
   );
@@ -673,15 +696,11 @@ export function NativeWebShell() {
         isInitialWebDocument(event.nativeEvent.url)
       ) {
         dispatchShellEvent({ type: "load-succeeded" });
-        if (!hasHiddenNativeSplashRef.current) {
-          hasHiddenNativeSplashRef.current = true;
-          void SplashScreen.hideAsync().catch(() => {
-            // The custom overlay remains visible until this first successful load.
-          });
-        }
+        // Fallback if the image readiness event could not complete first.
+        hideNativeSplash();
       }
     },
-    [dispatchShellEvent],
+    [dispatchShellEvent, hideNativeSplash],
   );
 
   const handleInitialError = useCallback(() => {
@@ -711,6 +730,12 @@ export function NativeWebShell() {
     },
     [nativePlatform],
   );
+
+  const launchSplashVisible =
+    isLaunchSplashVisible(shellState.initialReady) || loading;
+  const displayedStatusBarBackground = splashOverlayMounted
+    ? LAUNCH_BACKGROUND
+    : safeAreaBackground;
 
   const webView =
     nativeAuthStateResolved && initialWebUrl ? (
@@ -751,8 +776,8 @@ export function NativeWebShell() {
   return (
     <View style={[styles.container, { backgroundColor: safeAreaBackground }]}>
       <StatusBar
-        backgroundColor={safeAreaBackground}
-        barStyle={statusBarStyleFor(safeAreaBackground)}
+        backgroundColor={displayedStatusBarBackground}
+        barStyle={splashOverlayMounted ? "light-content" : statusBarStyleFor(safeAreaBackground)}
       />
       <SafeAreaView
         edges={["top", "bottom"]}
@@ -760,12 +785,14 @@ export function NativeWebShell() {
       >
         <View style={styles.webFrame}>
           {webView}
-          {loading && shellState.initialReady ? (
-            <View pointerEvents="none" style={styles.loadingLine} />
-          ) : null}
         </View>
       </SafeAreaView>
-      <LaunchSplash visible={isLaunchSplashVisible(shellState.initialReady)} />
+      <LaunchSplash
+        key={splashGeneration}
+        visible={launchSplashVisible}
+        onReady={hideNativeSplash}
+        onHidden={handleSplashHidden}
+      />
     </View>
   );
 }
@@ -775,14 +802,6 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1 },
   webFrame: { flex: 1, backgroundColor: "#ffffff" },
   webView: { flex: 1, backgroundColor: "#ffffff" },
-  loadingLine: {
-    position: "absolute",
-    top: 0,
-    right: 0,
-    left: 0,
-    height: 3,
-    backgroundColor: "#dc2626",
-  },
   notice: {
     position: "absolute",
     bottom: 34,
