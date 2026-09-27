@@ -4,12 +4,18 @@ on:
   push:
     paths:
       - "src/**"
+      - "app.json"
+      - "assets/images/**"
+      - "scripts/**"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/native-shell-ci.yml"
   pull_request:
     paths:
       - "src/**"
+      - "app.json"
+      - "assets/images/**"
+      - "scripts/**"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/native-shell-ci.yml"
