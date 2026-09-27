@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   AccessibilityInfo,
   Animated,
@@ -19,11 +19,9 @@ const ARTWORK_BACKGROUND = '#c03636';
 
 type LaunchSplashProps = {
   visible: boolean;
-  onMounted: () => void;
 };
 
-export function LaunchSplash({ visible, onMounted }: LaunchSplashProps) {
-  const mountedNotified = useRef(false);
+export function LaunchSplash({ visible }: LaunchSplashProps) {
   const [overlayOpacity] = useState(() => new Animated.Value(1));
   const [dotOpacities] = useState(() => [
     new Animated.Value(DOT_IDLE_OPACITY),
@@ -97,11 +95,6 @@ export function LaunchSplash({ visible, onMounted }: LaunchSplashProps) {
     <Animated.View
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
-      onLayout={() => {
-        if (mountedNotified.current) return;
-        mountedNotified.current = true;
-        onMounted();
-      }}
       pointerEvents={visible ? 'auto' : 'none'}
       style={[styles.overlay, { opacity: overlayOpacity }]}
     >
