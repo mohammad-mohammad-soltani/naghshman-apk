@@ -1,6 +1,9 @@
 export type WebShellState = {
+  /** The first successfully loaded app document must remain remembered. */
   initialReady: boolean;
   initialFailed: boolean;
+  /** Unlike initialFailed, this also covers failed later navigations. */
+  documentFailed: boolean;
   online: boolean;
 };
 
@@ -14,6 +17,7 @@ export type WebShellEvent =
 export const INITIAL_WEB_SHELL_STATE: WebShellState = {
   initialReady: false,
   initialFailed: false,
+  documentFailed: false,
   online: true,
 };
 
@@ -23,30 +27,36 @@ export function reduceWebShellState(
 ): WebShellState {
   switch (event.type) {
     case 'load-succeeded':
-      return state.initialReady
+      return state.initialReady && !state.initialFailed && !state.documentFailed
         ? state
-        : { ...state, initialReady: true, initialFailed: false };
+        : { ...state, initialReady: true, initialFailed: false, documentFailed: false };
     case 'load-failed':
-      return state.initialReady ? state : { ...state, initialFailed: true };
-    case 'retry-started':
-      return state.initialReady ? state : { ...state, initialFailed: false };
-    case 'http-error':
-      return state.initialReady || event.statusCode < 500
+      return state.documentFailed
         ? state
-        : { ...state, initialFailed: true };
+        : {
+            ...state,
+            initialFailed: !state.initialReady,
+            documentFailed: true,
+          };
+    case 'retry-started':
+      return !state.initialFailed && !state.documentFailed
+        ? state
+        : { ...state, initialFailed: false, documentFailed: false };
+    case 'http-error':
+      return event.statusCode >= 500
+        ? reduceWebShellState(state, { type: 'load-failed' })
+        : state;
     case 'network-changed':
-      return state.online === event.online ? state : { ...state, online: event.online };
+      return state.online === event.online
+        ? state
+        : { ...state, online: event.online };
   }
 }
 
-export function shouldRetryInitialLoad(
+/** Never reload a healthy, already-rendered document just for reconnection. */
+export function shouldRetryFailedLoad(
   previous: WebShellState,
   nextOnline: boolean,
 ): boolean {
-  return (
-    !previous.initialReady &&
-    previous.initialFailed &&
-    !previous.online &&
-    nextOnline
-  );
+  return previous.documentFailed && !previous.online && nextOnline;
 }
