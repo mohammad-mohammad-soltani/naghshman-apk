@@ -294,16 +294,11 @@ export function NativeWebShell() {
   const [nativePushToken, setNativePushToken] = useState<string | null>(null);
   const nativeAuthStateResolved = !nativePlatform || storedRefreshToken !== undefined;
   const nativeAuthenticated = !nativePlatform || Boolean(storedRefreshToken);
-  const initialWebUrlRef = useRef<string | null>(null);
-  // WebView's source is a bootstrap URL, not reactive navigation state.
-  // Changing /auth to / after OTP success would tear down the page while
-  // it is waiting for the SecureStore acknowledgement.
-  if (initialWebUrlRef.current === null && nativeAuthStateResolved) {
-    initialWebUrlRef.current = nativePlatform
-      ? initialNativeWebUrl(APP_URL, storedRefreshToken ?? null)
-      : APP_URL;
-  }
-  const initialWebUrl = initialWebUrlRef.current;
+  // WebView's source is set once when the initial credential is loaded.
+  // Updating storedRefreshToken after OTP must not navigate or remount it.
+  const [initialWebUrl, setInitialWebUrl] = useState<string | null>(
+    nativePlatform ? null : APP_URL,
+  );
   const bootstrap = useMemo(
     () =>
       nativePlatform
@@ -330,12 +325,14 @@ export function NativeWebShell() {
       .then((token) => {
         if (active) {
           nativeAuthenticatedRef.current = Boolean(token);
+          setInitialWebUrl((current) => current ?? initialNativeWebUrl(APP_URL, token));
           setStoredRefreshToken(token);
         }
       })
       .catch(() => {
         if (active) {
           nativeAuthenticatedRef.current = false;
+          setInitialWebUrl((current) => current ?? initialNativeWebUrl(APP_URL, null));
           setStoredRefreshToken(null);
         }
       });
