@@ -294,11 +294,16 @@ export function NativeWebShell() {
   const [nativePushToken, setNativePushToken] = useState<string | null>(null);
   const nativeAuthStateResolved = !nativePlatform || storedRefreshToken !== undefined;
   const nativeAuthenticated = !nativePlatform || Boolean(storedRefreshToken);
-  const initialWebUrl = nativeAuthStateResolved
-    ? nativePlatform
+  const initialWebUrlRef = useRef<string | null>(null);
+  // WebView's source is a bootstrap URL, not reactive navigation state.
+  // Changing /auth to / after OTP success would tear down the page while
+  // it is waiting for the SecureStore acknowledgement.
+  if (initialWebUrlRef.current === null && nativeAuthStateResolved) {
+    initialWebUrlRef.current = nativePlatform
       ? initialNativeWebUrl(APP_URL, storedRefreshToken ?? null)
-      : APP_URL
-    : null;
+      : APP_URL;
+  }
+  const initialWebUrl = initialWebUrlRef.current;
   const bootstrap = useMemo(
     () =>
       nativePlatform
