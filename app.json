@@ -33,7 +33,7 @@
         "expo-splash-screen",
         {
           "backgroundColor": "#c03636",
-          "image": "./assets/images/native-splash-map.png",
+          "image": "./assets/images/native-floral-mark.png",
           "imageWidth": 260,
           "resizeMode": "contain"
         }

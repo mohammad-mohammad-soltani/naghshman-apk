@@ -46,3 +46,32 @@ test('keeps the adaptive icon mark centered inside a 66 percent safe area', () =
   assert.ok(Math.abs(centerX - png.width / 2) <= png.width * 0.02);
   assert.ok(Math.abs(centerY - png.height / 2) <= png.height * 0.02);
 });
+
+// Android 12 constrains the system splash to a centered static image. The
+// full portrait poster and animated dots are displayed by LaunchSplash.
+test('uses a square transparent floral mark rather than the portrait poster in the OS splash', () => {
+  const config = JSON.parse(readFileSync(new URL('app.json', root), 'utf8'));
+  const plugin = config.expo.plugins.find((entry) => Array.isArray(entry) && entry[0] === 'expo-splash-screen');
+  assert.equal(plugin[1].image, './assets/images/native-floral-mark.png');
+  assert.equal(plugin[1].backgroundColor, '#c03636');
+
+  const png = PNG.sync.read(readFileSync(new URL('assets/images/native-floral-mark.png', root)));
+  assert.equal(png.width, png.height);
+  const width = png.width;
+  let left = width;
+  let top = width;
+  let right = -1;
+  let bottom = -1;
+  for (let y = 0; y < width; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (png.data[(width * y + x) * 4 + 3] < 128) continue;
+      left = Math.min(left, x);
+      right = Math.max(right, x);
+      top = Math.min(top, y);
+      bottom = Math.max(bottom, y);
+    }
+  }
+  assert.ok(left >= width * 0.15 && top >= width * 0.15, 'mark clears top and left OS icon safe area');
+  assert.ok(right <= width * 0.85 && bottom <= width * 0.85, 'mark clears bottom and right OS icon safe area');
+  assert.ok(right > left && bottom > top, 'floral mark is visible');
+});
