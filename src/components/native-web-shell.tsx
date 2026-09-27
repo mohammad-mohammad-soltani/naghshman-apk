@@ -337,9 +337,13 @@ export function NativeWebShell() {
     const lastResponse = Notifications.getLastNotificationResponse();
     if (lastResponse) {
       openNativeNotification(lastResponse.notification.request.content.data ?? {});
+      Notifications.clearLastNotificationResponse();
     }
     const subscription = Notifications.addNotificationResponseReceivedListener(
-      (response) => openNativeNotification(response.notification.request.content.data ?? {}),
+      (response) => {
+        openNativeNotification(response.notification.request.content.data ?? {});
+        Notifications.clearLastNotificationResponse();
+      },
     );
     return () => subscription.remove();
   }, [nativePlatform, openNativeNotification]);
@@ -376,6 +380,14 @@ export function NativeWebShell() {
       active = false;
     };
   }, [nativeAuthenticated, nativePlatform]);
+
+  useEffect(() => {
+    if (!nativePlatform) return;
+    const subscription = Notifications.addPushTokenListener((token) => {
+      if (isExpoPushToken(token.data)) setNativePushToken(token.data);
+    });
+    return () => subscription.remove();
+  }, [nativePlatform]);
 
   useEffect(() => {
     if (Platform.OS !== "android") return;
