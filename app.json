@@ -5,7 +5,7 @@
     "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/meydan-icon.png",
-    "backgroundColor": "#dc2626",
+    "backgroundColor": "#c03636",
     "primaryColor": "#dc2626",
     "scheme": "naghshman",
     "userInterfaceStyle": "light",
@@ -20,7 +20,7 @@
       "predictiveBackGestureEnabled": false,
       "package": "ir.naghshman.app",
       "versionCode": 2,
-      "backgroundColor": "#dc2626",
+      "backgroundColor": "#c03636",
       "userInterfaceStyle": "light"
     },
     "web": {

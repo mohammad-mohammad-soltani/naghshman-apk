@@ -6,8 +6,8 @@ const shell = readFileSync(new URL('../components/native-web-shell.tsx', import.
 
 test('login does not remount WebView while the native credential is being saved', () => {
   assert.match(shell, /const \[initialWebUrl, setInitialWebUrl\] = useState<string \| null>/);
-  assert.match(shell, /setInitialWebUrl\(\(current\) => current \?\? initialNativeWebUrl\(APP_URL, token\)\)/);
-  assert.match(shell, /setInitialWebUrl\(\(current\) => current \?\? initialNativeWebUrl\(APP_URL, null\)\)/);
+  assert.match(shell, /setInitialWebUrl\(\s*\(current\) => current \?\? initialNativeWebUrl\(APP_URL, token\),?\s*\)/);
+  assert.match(shell, /setInitialWebUrl\(\s*\(current\) => current \?\? initialNativeWebUrl\(APP_URL, null\),?\s*\)/);
   assert.match(shell, /source=\{\{ uri: initialWebUrl \}\}/);
 });
 

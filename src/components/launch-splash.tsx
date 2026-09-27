@@ -7,6 +7,7 @@ import {
   View,
 } from 'react-native';
 
+import { isNativeSplashReady } from '@/lib/launch-splash-visibility';
 import {
   RIGHT_TO_LEFT_DOT_ORDER,
   STATIC_REDUCED_MOTION_OPACITIES,
@@ -19,9 +20,11 @@ const ARTWORK_BACKGROUND = '#c03636';
 
 type LaunchSplashProps = {
   visible: boolean;
+  onReady: () => void;
+  onHidden?: () => void;
 };
 
-export function LaunchSplash({ visible }: LaunchSplashProps) {
+export function LaunchSplash({ visible, onReady, onHidden }: LaunchSplashProps) {
   const [overlayOpacity] = useState(() => new Animated.Value(1));
   const [dotOpacities] = useState(() => [
     new Animated.Value(DOT_IDLE_OPACITY),
@@ -29,6 +32,12 @@ export function LaunchSplash({ visible }: LaunchSplashProps) {
     new Animated.Value(DOT_IDLE_OPACITY),
   ]);
   const [rendered, setRendered] = useState(true);
+  const [artworkLaidOut, setArtworkLaidOut] = useState(false);
+  const [artworkLoaded, setArtworkLoaded] = useState(false);
+
+  useEffect(() => {
+    if (isNativeSplashReady(artworkLaidOut, artworkLoaded)) onReady();
+  }, [artworkLaidOut, artworkLoaded, onReady]);
 
   useEffect(() => {
     let active = true;
@@ -85,9 +94,12 @@ export function LaunchSplash({ visible }: LaunchSplashProps) {
       duration: 240,
       useNativeDriver: true,
     }).start(({ finished }) => {
-      if (finished) setRendered(false);
+      if (finished) {
+        setRendered(false);
+        onHidden?.();
+      }
     });
-  }, [overlayOpacity, visible]);
+  }, [overlayOpacity, visible, onHidden]);
 
   if (!rendered) return null;
 
@@ -96,11 +108,13 @@ export function LaunchSplash({ visible }: LaunchSplashProps) {
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
       pointerEvents={visible ? 'auto' : 'none'}
+      onLayout={() => setArtworkLaidOut(true)}
       style={[styles.overlay, { opacity: overlayOpacity }]}
     >
       <Image
         resizeMode="stretch"
         source={require('../../assets/images/splash-dotless.jpg')}
+        onLoadEnd={() => setArtworkLoaded(true)}
         style={styles.artwork}
       />
       <View style={styles.dots}>
