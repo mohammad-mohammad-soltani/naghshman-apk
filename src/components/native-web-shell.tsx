@@ -1,6 +1,8 @@
 import * as Clipboard from "expo-clipboard";
+import Constants from "expo-constants";
 import { File, Paths } from "expo-file-system";
 import { useNetworkState } from "expo-network";
+import * as Notifications from "expo-notifications";
 import * as SecureStore from "expo-secure-store";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -27,6 +29,10 @@ import {
   initialNativeWebUrl,
   shouldAllowNativeGuestNavigation,
 } from "@/lib/native-auth-gate";
+import {
+  isExpoPushToken,
+  nativeNotificationRoute,
+} from "@/lib/native-push";
 import { isAllowedWebUrl, parseNativeBridgeMessage } from "@/lib/native-bridge";
 import {
   INITIAL_WEB_SHELL_STATE,
@@ -40,6 +46,15 @@ import * as SplashScreen from "expo-splash-screen";
 const APP_URL = "https://naghshman.ir";
 const REFRESH_TOKEN_KEY = "naghshman.refresh-token";
 const BRAND_BACKGROUND = "#dc2626";
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
 
 function statusBarStyleFor(
   backgroundColor: string,
@@ -113,6 +128,18 @@ function nativeBootstrap(
       } finally {
         window.__naghshmanRestoreInProgress = false;
       }
+    });
+    window.addEventListener('naghshman:native-push-token', function (event) {
+      var detail = event && event.detail;
+      var token = detail && detail.token;
+      var platform = detail && detail.platform;
+      if (typeof token !== 'string' || !/^(?:ExponentPushToken|ExpoPushToken)\\[[A-Za-z0-9_-]{1,512}\\]$/.test(token)) return;
+      if (platform !== 'android' && platform !== 'ios') return;
+      originalFetch('/api/meydan/push/native-tokens', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ token: token, platform: platform })
+      }).catch(function () {});
     });
     window.dispatchEvent(new Event('naghshman:native-ready'));
     }
@@ -236,6 +263,8 @@ export function NativeWebShell() {
   const canGoBackRef = useRef(false);
   const hasHiddenNativeSplashRef = useRef(false);
   const restoreAttemptedToken = useRef<string | null>(null);
+  const pendingNotificationRoute = useRef<string | null>(null);
+  const webViewDocumentReady = useRef(false);
   const initialAttemptHadError = useRef(false);
   const mainDocumentUrl = useRef(APP_URL);
   const shellStateRef = useRef(INITIAL_WEB_SHELL_STATE);
@@ -247,6 +276,7 @@ export function NativeWebShell() {
   const [storedRefreshToken, setStoredRefreshToken] = useState<
     string | null | undefined
   >(nativePlatform ? undefined : null);
+  const [nativePushToken, setNativePushToken] = useState<string | null>(null);
   const nativeAuthStateResolved = !nativePlatform || storedRefreshToken !== undefined;
   const nativeAuthenticated = !nativePlatform || Boolean(storedRefreshToken);
   const initialWebUrl = nativeAuthStateResolved
@@ -288,6 +318,64 @@ export function NativeWebShell() {
       active = false;
     };
   }, [nativePlatform]);
+
+  const openNativeNotification = useCallback((data: Record<string, unknown>) => {
+    const route = nativeNotificationRoute(data, APP_URL);
+    if (!route) return;
+    pendingNotificationRoute.current = route;
+    if (webViewDocumentReady.current) {
+      pendingNotificationRoute.current = null;
+      webViewRef.current?.injectJavaScript(
+        `window.location.assign(${JSON.stringify(route)}); true;`,
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!nativePlatform) return;
+
+    const lastResponse = Notifications.getLastNotificationResponse();
+    if (lastResponse) {
+      openNativeNotification(lastResponse.notification.request.content.data ?? {});
+    }
+    const subscription = Notifications.addNotificationResponseReceivedListener(
+      (response) => openNativeNotification(response.notification.request.content.data ?? {}),
+    );
+    return () => subscription.remove();
+  }, [nativePlatform, openNativeNotification]);
+
+  useEffect(() => {
+    if (!nativePlatform || !nativeAuthenticated) return;
+    let active = true;
+
+    void (async () => {
+      if (Platform.OS === "android") {
+        await Notifications.setNotificationChannelAsync("default", {
+          name: "اعلان‌های نقش من",
+          importance: Notifications.AndroidImportance.HIGH,
+          vibrationPattern: [0, 250, 150, 250],
+          lightColor: BRAND_BACKGROUND,
+        });
+      }
+      const existing = await Notifications.getPermissionsAsync();
+      const permission = existing.status === "granted"
+        ? existing
+        : await Notifications.requestPermissionsAsync();
+      if (permission.status !== "granted") return;
+
+      const projectId = Constants.expoConfig?.extra?.eas?.projectId
+        ?? Constants.easConfig?.projectId;
+      if (!projectId) return;
+      const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
+      if (active && isExpoPushToken(token)) setNativePushToken(token);
+    })().catch(() => {
+      // A later app launch retries transient network and provider failures.
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [nativeAuthenticated, nativePlatform]);
 
   useEffect(() => {
     if (Platform.OS !== "android") return;
@@ -354,6 +442,20 @@ export function NativeWebShell() {
       true;
     `);
   }, []);
+
+  const syncNativePushToken = useCallback(() => {
+    if (!nativePushToken || !nativePlatform) return;
+    webViewRef.current?.injectJavaScript(`
+      window.dispatchEvent(new CustomEvent('naghshman:native-push-token', {
+        detail: ${JSON.stringify({ token: nativePushToken, platform: nativePlatform })}
+      }));
+      true;
+    `);
+  }, [nativePlatform, nativePushToken]);
+
+  useEffect(() => {
+    syncNativePushToken();
+  }, [syncNativePushToken]);
 
   const saveMedia = useCallback(
     async (url: string, suppliedFilename?: string) => {
@@ -427,9 +529,20 @@ export function NativeWebShell() {
   const handleLoadEnd = useCallback(
     (event: { nativeEvent: { url: string } }) => {
       setLoading(false);
+      webViewDocumentReady.current = true;
       // The initial bootstrap can run before Next has applied its theme CSS.
       // Reading after document load makes the first safe-area color deterministic.
       syncSafeAreaBackground();
+      syncNativePushToken();
+
+      if (pendingNotificationRoute.current) {
+        const route = pendingNotificationRoute.current;
+        pendingNotificationRoute.current = null;
+        webViewRef.current?.injectJavaScript(
+          `window.location.assign(${JSON.stringify(route)}); true;`,
+        );
+        return;
+      }
 
       if (
         !nativePlatform ||
@@ -447,12 +560,13 @@ export function NativeWebShell() {
       true;
     `);
     },
-    [nativePlatform, storedRefreshToken, syncSafeAreaBackground],
+    [nativePlatform, storedRefreshToken, syncNativePushToken, syncSafeAreaBackground],
   );
 
   const handleLoadStart = useCallback(
     (event: { nativeEvent: { url: string } }) => {
       mainDocumentUrl.current = event.nativeEvent.url;
+      webViewDocumentReady.current = false;
       initialAttemptHadError.current = false;
       if (shellStateRef.current.initialReady) setLoading(true);
     },
