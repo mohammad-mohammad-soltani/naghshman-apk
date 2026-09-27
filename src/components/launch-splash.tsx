@@ -40,6 +40,8 @@ export function LaunchSplash({ visible, onReady, onHidden }: LaunchSplashProps) 
   }, [artworkLaidOut, artworkLoaded, onReady]);
 
   useEffect(() => {
+    if (!visible) return;
+
     let active = true;
     let loop: Animated.CompositeAnimation | null = null;
 
@@ -84,21 +86,30 @@ export function LaunchSplash({ visible, onReady, onHidden }: LaunchSplashProps) 
       loop?.stop();
       subscription.remove();
     };
-  }, [dotOpacities]);
+  }, [dotOpacities, visible]);
 
   useEffect(() => {
-    if (visible) return;
+    // An interrupted fade must never notify the parent that a newer splash
+    // has disappeared (for example, during two rapid WebView navigations).
+    overlayOpacity.stopAnimation();
+    if (visible) {
+      overlayOpacity.setValue(1);
+      return;
+    }
 
-    Animated.timing(overlayOpacity, {
+    const fade = Animated.timing(overlayOpacity, {
       toValue: 0,
       duration: 240,
       useNativeDriver: true,
-    }).start(({ finished }) => {
+    });
+    fade.start(({ finished }) => {
       if (finished) {
         setRendered(false);
         onHidden?.();
       }
     });
+
+    return () => fade.stop();
   }, [overlayOpacity, visible, onHidden]);
 
   if (!rendered) return null;
@@ -112,7 +123,7 @@ export function LaunchSplash({ visible, onReady, onHidden }: LaunchSplashProps) 
       style={[styles.overlay, { opacity: overlayOpacity }]}
     >
       <Image
-        resizeMode="stretch"
+        resizeMode="cover"
         source={require('../../assets/images/splash-dotless.jpg')}
         onLoadEnd={() => setArtworkLoaded(true)}
         style={styles.artwork}

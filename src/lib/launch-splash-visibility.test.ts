@@ -8,6 +8,16 @@ test('keeps the launch splash visible until the first document is ready', () => 
   assert.equal(isLaunchSplashVisible(true), false);
 });
 
+test('uses the same full-screen artwork for later top-level document loads', () => {
+  assert.equal(isLaunchSplashVisible(true, true), true);
+  assert.equal(isLaunchSplashVisible(true, false), false);
+});
+
+test('does not fade away until the native-to-custom splash handoff resolves', () => {
+  assert.equal(isLaunchSplashVisible(true, false, false), true);
+  assert.equal(isLaunchSplashVisible(true, false, true), false);
+});
+
 test('hands off the OS splash only after the branded artwork is laid out and loaded', () => {
   assert.equal(isNativeSplashReady(false, false), false);
   assert.equal(isNativeSplashReady(true, false), false);
