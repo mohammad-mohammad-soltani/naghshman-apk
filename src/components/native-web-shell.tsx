@@ -11,7 +11,6 @@ import {
   Share,
   StatusBar,
   StyleSheet,
-  Text,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -28,12 +27,12 @@ import {
   initialNativeWebUrl,
   shouldAllowNativeGuestNavigation,
 } from "@/lib/native-auth-gate";
+import { isAllowedWebUrl, parseNativeBridgeMessage } from "@/lib/native-bridge";
 import {
   isExpoPushToken,
   nativeNotificationRoute,
   supportsNativePushNotifications,
 } from "@/lib/native-push";
-import { isAllowedWebUrl, parseNativeBridgeMessage } from "@/lib/native-bridge";
 import {
   INITIAL_WEB_SHELL_STATE,
   reduceWebShellState,
@@ -286,13 +285,15 @@ export function NativeWebShell() {
   const network = useNetworkState();
   const [shellState, setShellState] = useState(INITIAL_WEB_SHELL_STATE);
   const [loading, setLoading] = useState(false);
-  const [safeAreaBackground, setSafeAreaBackground] = useState(BRAND_BACKGROUND);
+  const [safeAreaBackground, setSafeAreaBackground] =
+    useState(BRAND_BACKGROUND);
   const [notice, setNotice] = useState<string | null>(null);
   const [storedRefreshToken, setStoredRefreshToken] = useState<
     string | null | undefined
   >(nativePlatform ? undefined : null);
   const [nativePushToken, setNativePushToken] = useState<string | null>(null);
-  const nativeAuthStateResolved = !nativePlatform || storedRefreshToken !== undefined;
+  const nativeAuthStateResolved =
+    !nativePlatform || storedRefreshToken !== undefined;
   const nativeAuthenticated = !nativePlatform || Boolean(storedRefreshToken);
   // WebView's source is set once when the initial credential is loaded.
   // Updating storedRefreshToken after OTP must not navigate or remount it.
@@ -325,14 +326,18 @@ export function NativeWebShell() {
       .then((token) => {
         if (active) {
           nativeAuthenticatedRef.current = Boolean(token);
-          setInitialWebUrl((current) => current ?? initialNativeWebUrl(APP_URL, token));
+          setInitialWebUrl(
+            (current) => current ?? initialNativeWebUrl(APP_URL, token),
+          );
           setStoredRefreshToken(token);
         }
       })
       .catch(() => {
         if (active) {
           nativeAuthenticatedRef.current = false;
-          setInitialWebUrl((current) => current ?? initialNativeWebUrl(APP_URL, null));
+          setInitialWebUrl(
+            (current) => current ?? initialNativeWebUrl(APP_URL, null),
+          );
           setStoredRefreshToken(null);
         }
       });
@@ -342,40 +347,49 @@ export function NativeWebShell() {
     };
   }, [nativePlatform]);
 
-  const openNativeNotification = useCallback((data: Record<string, unknown>) => {
-    const route = nativeNotificationRoute(data, APP_URL);
-    if (!route) return;
-    pendingNotificationRoute.current = route;
-    if (webViewDocumentReady.current) {
-      pendingNotificationRoute.current = null;
-      webViewRef.current?.injectJavaScript(
-        `window.location.assign(${JSON.stringify(route)}); true;`,
-      );
-    }
-  }, []);
+  const openNativeNotification = useCallback(
+    (data: Record<string, unknown>) => {
+      const route = nativeNotificationRoute(data, APP_URL);
+      if (!route) return;
+      pendingNotificationRoute.current = route;
+      if (webViewDocumentReady.current) {
+        pendingNotificationRoute.current = null;
+        webViewRef.current?.injectJavaScript(
+          `window.location.assign(${JSON.stringify(route)}); true;`,
+        );
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!canUseNativePush) return;
     let active = true;
     let subscription: { remove(): void } | undefined;
 
-    void import("expo-notifications").then((Notifications) => {
-      if (!active) return;
-      configureNotificationHandler(Notifications);
-      const lastResponse = Notifications.getLastNotificationResponse();
-      if (lastResponse) {
-        openNativeNotification(lastResponse.notification.request.content.data ?? {});
-        Notifications.clearLastNotificationResponse();
-      }
-      subscription = Notifications.addNotificationResponseReceivedListener(
-        (response) => {
-          openNativeNotification(response.notification.request.content.data ?? {});
+    void import("expo-notifications")
+      .then((Notifications) => {
+        if (!active) return;
+        configureNotificationHandler(Notifications);
+        const lastResponse = Notifications.getLastNotificationResponse();
+        if (lastResponse) {
+          openNativeNotification(
+            lastResponse.notification.request.content.data ?? {},
+          );
           Notifications.clearLastNotificationResponse();
-        },
-      );
-    }).catch(() => {
-      // Push support is unavailable in an unsupported native runtime.
-    });
+        }
+        subscription = Notifications.addNotificationResponseReceivedListener(
+          (response) => {
+            openNativeNotification(
+              response.notification.request.content.data ?? {},
+            );
+            Notifications.clearLastNotificationResponse();
+          },
+        );
+      })
+      .catch(() => {
+        // Push support is unavailable in an unsupported native runtime.
+      });
     return () => {
       active = false;
       subscription?.remove();
@@ -398,15 +412,18 @@ export function NativeWebShell() {
         });
       }
       const existing = await Notifications.getPermissionsAsync();
-      const permission = existing.status === "granted"
-        ? existing
-        : await Notifications.requestPermissionsAsync();
+      const permission =
+        existing.status === "granted"
+          ? existing
+          : await Notifications.requestPermissionsAsync();
       if (permission.status !== "granted") return;
 
-      const projectId = Constants.expoConfig?.extra?.eas?.projectId
-        ?? Constants.easConfig?.projectId;
+      const projectId =
+        Constants.expoConfig?.extra?.eas?.projectId ??
+        Constants.easConfig?.projectId;
       if (!projectId) return;
-      const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
+      const token = (await Notifications.getExpoPushTokenAsync({ projectId }))
+        .data;
       if (active && isExpoPushToken(token)) setNativePushToken(token);
     })().catch(() => {
       // A later app launch retries transient network and provider failures.
@@ -422,14 +439,16 @@ export function NativeWebShell() {
     let active = true;
     let subscription: { remove(): void } | undefined;
 
-    void import("expo-notifications").then((Notifications) => {
-      if (!active) return;
-      subscription = Notifications.addPushTokenListener((token) => {
-        if (isExpoPushToken(token.data)) setNativePushToken(token.data);
+    void import("expo-notifications")
+      .then((Notifications) => {
+        if (!active) return;
+        subscription = Notifications.addPushTokenListener((token) => {
+          if (isExpoPushToken(token.data)) setNativePushToken(token.data);
+        });
+      })
+      .catch(() => {
+        // Push support is unavailable in an unsupported native runtime.
       });
-    }).catch(() => {
-      // Push support is unavailable in an unsupported native runtime.
-    });
     return () => {
       active = false;
       subscription?.remove();
@@ -629,7 +648,12 @@ export function NativeWebShell() {
       true;
     `);
     },
-    [nativePlatform, storedRefreshToken, syncNativePushToken, syncSafeAreaBackground],
+    [
+      nativePlatform,
+      storedRefreshToken,
+      syncNativePushToken,
+      syncSafeAreaBackground,
+    ],
   );
 
   const handleLoadStart = useCallback(
@@ -665,59 +689,64 @@ export function NativeWebShell() {
     dispatchShellEvent({ type: "load-failed" });
   }, [dispatchShellEvent]);
 
-  const shouldStartLoad = useCallback((request: WebViewNavigation) => {
-    if (request.url === "about:blank") return true;
-    if (!isAllowedWebUrl(request.url)) {
-      void Linking.openURL(request.url);
+  const shouldStartLoad = useCallback(
+    (request: WebViewNavigation) => {
+      if (request.url === "about:blank") return true;
+      if (!isAllowedWebUrl(request.url)) {
+        void Linking.openURL(request.url);
+        return false;
+      }
+      if (
+        nativePlatform &&
+        !nativeAuthenticatedRef.current &&
+        !shouldAllowNativeGuestNavigation(request.url, APP_URL)
+      ) {
+        webViewRef.current?.injectJavaScript(
+          "window.location.replace('/auth'); true;",
+        );
+        return false;
+      }
+      if (isAllowedWebUrl(request.url)) return true;
       return false;
-    }
-    if (
-      nativePlatform &&
-      !nativeAuthenticatedRef.current &&
-      !shouldAllowNativeGuestNavigation(request.url, APP_URL)
-    ) {
-      webViewRef.current?.injectJavaScript("window.location.replace('/auth'); true;");
-      return false;
-    }
-    if (isAllowedWebUrl(request.url))
-      return true;
-    return false;
-  }, [nativePlatform]);
+    },
+    [nativePlatform],
+  );
 
-  const webView = nativeAuthStateResolved && initialWebUrl ? (
-    <WebView
-      ref={webViewRef}
-      source={{ uri: initialWebUrl }}
-      applicationNameForUserAgent="NaghshmanNative/1"
-      injectedJavaScriptBeforeContentLoaded={bootstrap}
-      injectedJavaScript={bootstrap}
-      javaScriptEnabled
-      domStorageEnabled
-      sharedCookiesEnabled
-      thirdPartyCookiesEnabled
-      cacheEnabled
-      pullToRefreshEnabled={Platform.OS === "android"}
-      originWhitelist={["https://*"]}
-      onMessage={(event) => void handleMessage(event)}
-      onShouldStartLoadWithRequest={shouldStartLoad}
-      onNavigationStateChange={(navigation) => {
-        canGoBackRef.current = navigation.canGoBack;
-      }}
-      onLoadStart={handleLoadStart}
-      onLoad={handleLoad}
-      onLoadEnd={handleLoadEnd}
-      onError={handleInitialError}
-      onHttpError={(event) => {
-        if (
-          event.nativeEvent.statusCode >= 500 &&
-          event.nativeEvent.url === mainDocumentUrl.current
-        ) {
-          handleInitialError();
-        }
-      }}
-      style={styles.webView}
-    />
-  ) : null;
+  const webView =
+    nativeAuthStateResolved && initialWebUrl ? (
+      <WebView
+        ref={webViewRef}
+        source={{ uri: initialWebUrl }}
+        applicationNameForUserAgent="NaghshmanNative/1"
+        injectedJavaScriptBeforeContentLoaded={bootstrap}
+        injectedJavaScript={bootstrap}
+        javaScriptEnabled
+        domStorageEnabled
+        sharedCookiesEnabled
+        thirdPartyCookiesEnabled
+        cacheEnabled
+        pullToRefreshEnabled={Platform.OS === "android"}
+        originWhitelist={["https://*"]}
+        onMessage={(event) => void handleMessage(event)}
+        onShouldStartLoadWithRequest={shouldStartLoad}
+        onNavigationStateChange={(navigation) => {
+          canGoBackRef.current = navigation.canGoBack;
+        }}
+        onLoadStart={handleLoadStart}
+        onLoad={handleLoad}
+        onLoadEnd={handleLoadEnd}
+        onError={handleInitialError}
+        onHttpError={(event) => {
+          if (
+            event.nativeEvent.statusCode >= 500 &&
+            event.nativeEvent.url === mainDocumentUrl.current
+          ) {
+            handleInitialError();
+          }
+        }}
+        style={styles.webView}
+      />
+    ) : null;
 
   return (
     <View style={[styles.container, { backgroundColor: safeAreaBackground }]}>
@@ -733,11 +762,6 @@ export function NativeWebShell() {
           {webView}
           {loading && shellState.initialReady ? (
             <View pointerEvents="none" style={styles.loadingLine} />
-          ) : null}
-          {notice ? (
-            <View style={styles.notice}>
-              <Text style={styles.noticeText}>{notice}</Text>
-            </View>
           ) : null}
         </View>
       </SafeAreaView>
