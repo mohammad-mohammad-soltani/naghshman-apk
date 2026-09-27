@@ -20,6 +20,12 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
       - name: Setup Expo / EAS
         uses: expo/expo-github-action@v8
         with:
@@ -35,17 +41,16 @@ jobs:
           npm run lint
           npm run typecheck
 
-      - name: Build Myket APK on EAS servers
-        id: eas-build
+      - name: Build signed Myket APK on GitHub runner
+        env:
+          EAS_LOCAL_BUILD_ARTIFACTS_DIR: ${{ github.workspace }}/local-build-artifacts
         run: |
           eas build \
             --platform android \
             --profile myket \
             --non-interactive \
-            --wait \
-            --json > eas-build.json
-          artifact_url="$(jq -er 'if type == "array" then .[0].artifacts.buildUrl else .artifacts.buildUrl end' eas-build.json)"
-          curl --fail --location --retry 3 "$artifact_url" --output naghshman-myket.apk
+            --local \
+            --output naghshman-myket.apk
 
       - name: Enforce 35–45 MiB APK budget
         run: npm run check:apk-size -- naghshman-myket.apk
