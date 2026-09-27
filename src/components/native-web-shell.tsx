@@ -2,7 +2,6 @@ import * as Clipboard from "expo-clipboard";
 import Constants from "expo-constants";
 import { File, Paths } from "expo-file-system";
 import { useNetworkState } from "expo-network";
-import * as Notifications from "expo-notifications";
 import * as SecureStore from "expo-secure-store";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -32,6 +31,7 @@ import {
 import {
   isExpoPushToken,
   nativeNotificationRoute,
+  supportsNativePushNotifications,
 } from "@/lib/native-push";
 import { isAllowedWebUrl, parseNativeBridgeMessage } from "@/lib/native-bridge";
 import {
@@ -47,14 +47,18 @@ const APP_URL = "https://naghshman.ir";
 const REFRESH_TOKEN_KEY = "naghshman.refresh-token";
 const BRAND_BACKGROUND = "#dc2626";
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+type NotificationsModule = typeof import("expo-notifications");
+
+function configureNotificationHandler(Notifications: NotificationsModule) {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    }),
+  });
+}
 
 function statusBarStyleFor(
   backgroundColor: string,
@@ -259,6 +263,10 @@ function filenameFor(url: string, supplied?: string): string {
 export function NativeWebShell() {
   const nativePlatform =
     Platform.OS === "android" || Platform.OS === "ios" ? Platform.OS : null;
+  const canUseNativePush = supportsNativePushNotifications(
+    nativePlatform,
+    Constants.executionEnvironment,
+  );
   const webViewRef = useRef<WebView>(null);
   const canGoBackRef = useRef(false);
   const hasHiddenNativeSplashRef = useRef(false);
@@ -332,27 +340,40 @@ export function NativeWebShell() {
   }, []);
 
   useEffect(() => {
-    if (!nativePlatform) return;
+    if (!canUseNativePush) return;
+    let active = true;
+    let subscription: { remove(): void } | undefined;
 
-    const lastResponse = Notifications.getLastNotificationResponse();
-    if (lastResponse) {
-      openNativeNotification(lastResponse.notification.request.content.data ?? {});
-      Notifications.clearLastNotificationResponse();
-    }
-    const subscription = Notifications.addNotificationResponseReceivedListener(
-      (response) => {
-        openNativeNotification(response.notification.request.content.data ?? {});
+    void import("expo-notifications").then((Notifications) => {
+      if (!active) return;
+      configureNotificationHandler(Notifications);
+      const lastResponse = Notifications.getLastNotificationResponse();
+      if (lastResponse) {
+        openNativeNotification(lastResponse.notification.request.content.data ?? {});
         Notifications.clearLastNotificationResponse();
-      },
-    );
-    return () => subscription.remove();
-  }, [nativePlatform, openNativeNotification]);
+      }
+      subscription = Notifications.addNotificationResponseReceivedListener(
+        (response) => {
+          openNativeNotification(response.notification.request.content.data ?? {});
+          Notifications.clearLastNotificationResponse();
+        },
+      );
+    }).catch(() => {
+      // Push support is unavailable in an unsupported native runtime.
+    });
+    return () => {
+      active = false;
+      subscription?.remove();
+    };
+  }, [canUseNativePush, openNativeNotification]);
 
   useEffect(() => {
-    if (!nativePlatform || !nativeAuthenticated) return;
+    if (!canUseNativePush || !nativeAuthenticated) return;
     let active = true;
 
     void (async () => {
+      const Notifications = await import("expo-notifications");
+      configureNotificationHandler(Notifications);
       if (Platform.OS === "android") {
         await Notifications.setNotificationChannelAsync("default", {
           name: "اعلان‌های نقش من",
@@ -379,15 +400,26 @@ export function NativeWebShell() {
     return () => {
       active = false;
     };
-  }, [nativeAuthenticated, nativePlatform]);
+  }, [canUseNativePush, nativeAuthenticated]);
 
   useEffect(() => {
-    if (!nativePlatform) return;
-    const subscription = Notifications.addPushTokenListener((token) => {
-      if (isExpoPushToken(token.data)) setNativePushToken(token.data);
+    if (!canUseNativePush) return;
+    let active = true;
+    let subscription: { remove(): void } | undefined;
+
+    void import("expo-notifications").then((Notifications) => {
+      if (!active) return;
+      subscription = Notifications.addPushTokenListener((token) => {
+        if (isExpoPushToken(token.data)) setNativePushToken(token.data);
+      });
+    }).catch(() => {
+      // Push support is unavailable in an unsupported native runtime.
     });
-    return () => subscription.remove();
-  }, [nativePlatform]);
+    return () => {
+      active = false;
+      subscription?.remove();
+    };
+  }, [canUseNativePush]);
 
   useEffect(() => {
     if (Platform.OS !== "android") return;

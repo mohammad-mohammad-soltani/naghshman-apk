@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   isExpoPushToken,
   nativeNotificationRoute,
+  supportsNativePushNotifications,
 } from "./native-push.ts";
 
 const APP_URL = "https://naghshman.ir";
@@ -33,4 +34,11 @@ test("rejects notification navigation outside the application", () => {
   );
   assert.equal(nativeNotificationRoute({ url: "javascript:alert(1)" }, APP_URL), null);
   assert.equal(nativeNotificationRoute({}, APP_URL), null);
+});
+
+test("skips remote push only in Android Expo Go", () => {
+  assert.equal(supportsNativePushNotifications("android", "storeClient"), false);
+  assert.equal(supportsNativePushNotifications("android", "standalone"), true);
+  assert.equal(supportsNativePushNotifications("ios", "storeClient"), true);
+  assert.equal(supportsNativePushNotifications(null, "standalone"), false);
 });

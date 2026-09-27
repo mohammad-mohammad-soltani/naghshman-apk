@@ -4,6 +4,15 @@ export function isExpoPushToken(value: unknown): value is string {
   return typeof value === "string" && EXPO_PUSH_TOKEN.test(value);
 }
 
+export function supportsNativePushNotifications(
+  platform: "android" | "ios" | null,
+  executionEnvironment: string | null | undefined,
+): boolean {
+  return platform !== null && !(
+    platform === "android" && executionEnvironment === "storeClient"
+  );
+}
+
 /**
  * Notification payloads are untrusted input. Keep navigation inside the
  * Naghshman WebView even when a third-party push provider delivers the tap.
