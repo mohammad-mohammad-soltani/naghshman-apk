@@ -23,6 +23,10 @@ import {
 import { LaunchSplash } from "@/components/launch-splash";
 import { isInitialWebDocument } from "@/lib/initial-web-document";
 import { isLaunchSplashVisible } from "@/lib/launch-splash-visibility";
+import {
+  initialNativeWebUrl,
+  shouldAllowNativeGuestNavigation,
+} from "@/lib/native-auth-gate";
 import { isAllowedWebUrl, parseNativeBridgeMessage } from "@/lib/native-bridge";
 import {
   INITIAL_WEB_SHELL_STATE,
@@ -47,11 +51,15 @@ function statusBarStyleFor(
   return luminance > 160 ? "dark-content" : "light-content";
 }
 
-function nativeBootstrap(platform: "android" | "ios") {
+function nativeBootstrap(
+  platform: "android" | "ios",
+  initiallyAuthenticated: boolean,
+) {
   return `
   (function () {
-    if (window.NaghshmanNative) return true;
-    window.NaghshmanNative = Object.freeze({ platform: '${platform}', version: 1 });
+    var nativeAlreadyInitialized = Boolean(window.NaghshmanNative);
+    if (!nativeAlreadyInitialized) {
+      window.NaghshmanNative = Object.freeze({ platform: '${platform}', version: 1 });
     var post = function (payload) {
       if (window.ReactNativeWebView && typeof window.ReactNativeWebView.postMessage === 'function') {
         window.ReactNativeWebView.postMessage(JSON.stringify(Object.assign({
@@ -107,27 +115,100 @@ function nativeBootstrap(platform: "android" | "ios") {
       }
     });
     window.dispatchEvent(new Event('naghshman:native-ready'));
-    var lastBackground;
-    var reportBackground = function () {
-      var background = window.getComputedStyle(document.documentElement)
-        .getPropertyValue('--background').trim();
-      if (/^#[0-9a-f]{6}$/i.test(background) && background !== lastBackground) {
-        lastBackground = background;
-        post({ type: 'set-safe-area-background', color: background });
-      }
-    };
-    var scheduleBackgroundReport = function () {
-      if (typeof window.requestAnimationFrame === 'function') {
-        window.requestAnimationFrame(reportBackground);
-      } else {
-        window.setTimeout(reportBackground, 0);
-      }
-    };
-    scheduleBackgroundReport();
-    new MutationObserver(scheduleBackgroundReport).observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['class', 'style']
-    });
+    }
+
+    if (!window.__naghshmanBackgroundReporter) {
+      window.__naghshmanBackgroundReporter = true;
+      var lastBackground;
+      var reportBackground = function () {
+        var root = document.documentElement;
+        if (!root) return;
+        var background = window.getComputedStyle(root)
+          .getPropertyValue('--background').trim();
+        if (/^#[0-9a-f]{6}$/i.test(background) && background !== lastBackground) {
+          lastBackground = background;
+          if (window.ReactNativeWebView && typeof window.ReactNativeWebView.postMessage === 'function') {
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              source: 'naghshman-web',
+              version: 1,
+              type: 'set-safe-area-background',
+              color: background
+            }));
+          }
+        }
+      };
+      var scheduleBackgroundReport = function () {
+        if (typeof window.requestAnimationFrame === 'function') {
+          window.requestAnimationFrame(reportBackground);
+        } else {
+          window.setTimeout(reportBackground, 0);
+        }
+      };
+      var observeBackground = function () {
+        var root = document.documentElement;
+        if (!root) return;
+        scheduleBackgroundReport();
+        new MutationObserver(scheduleBackgroundReport).observe(root, {
+          attributes: true,
+          attributeFilter: ['class', 'style']
+        });
+      };
+      if (document.documentElement) observeBackground();
+      else document.addEventListener('DOMContentLoaded', observeBackground, { once: true });
+    }
+
+    if (!window.__naghshmanAuthGuard) {
+      window.__naghshmanAuthGuard = true;
+      window.__naghshmanNativeAuthenticated = ${initiallyAuthenticated};
+      var authPath = function (value) {
+        try {
+          var url = new URL(value, window.location.origin);
+          return url.origin === window.location.origin &&
+            (url.pathname === '/auth' || url.pathname.indexOf('/auth/') === 0);
+        } catch (error) {
+          return false;
+        }
+      };
+      var syncGuestNavigation = function () {
+        var root = document.documentElement;
+        if (root) root.dataset.naghshmanNativeGuest = window.__naghshmanNativeAuthenticated ? 'false' : 'true';
+        if (!window.__naghshmanNativeAuthenticated && !authPath(window.location.href)) {
+          window.location.replace('/auth');
+        }
+      };
+      var guardNavigation = function (event) {
+        if (window.__naghshmanNativeAuthenticated) return;
+        var link = event.target && event.target.closest ? event.target.closest('a[href]') : null;
+        if (!link || authPath(link.href)) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        syncGuestNavigation();
+      };
+      document.addEventListener('click', guardNavigation, true);
+      ['pushState', 'replaceState'].forEach(function (method) {
+        var original = window.history[method];
+        window.history[method] = function () {
+          var result = original.apply(this, arguments);
+          window.setTimeout(syncGuestNavigation, 0);
+          return result;
+        };
+      });
+      window.addEventListener('popstate', syncGuestNavigation);
+      window.addEventListener('naghshman:native-auth-state', function (event) {
+        window.__naghshmanNativeAuthenticated = Boolean(event && event.detail && event.detail.authenticated);
+        syncGuestNavigation();
+      });
+      var installGuestChrome = function () {
+        var root = document.documentElement;
+        if (!root) return;
+        var guestStyle = document.createElement('style');
+        guestStyle.textContent = '[data-naghshman-native-guest="true"] #bottomNavBar { display: none !important; }';
+        (document.head || root).appendChild(guestStyle);
+        syncGuestNavigation();
+      };
+      if (document.documentElement) installGuestChrome();
+      else document.addEventListener('DOMContentLoaded', installGuestChrome, { once: true });
+    }
     return true;
   })();
 `;
@@ -166,9 +247,19 @@ export function NativeWebShell() {
   const [storedRefreshToken, setStoredRefreshToken] = useState<
     string | null | undefined
   >(nativePlatform ? undefined : null);
+  const nativeAuthStateResolved = !nativePlatform || storedRefreshToken !== undefined;
+  const nativeAuthenticated = !nativePlatform || Boolean(storedRefreshToken);
+  const initialWebUrl = nativeAuthStateResolved
+    ? nativePlatform
+      ? initialNativeWebUrl(APP_URL, storedRefreshToken ?? null)
+      : APP_URL
+    : null;
   const bootstrap = useMemo(
-    () => (nativePlatform ? nativeBootstrap(nativePlatform) : undefined),
-    [nativePlatform],
+    () =>
+      nativePlatform
+        ? nativeBootstrap(nativePlatform, nativeAuthenticated)
+        : undefined,
+    [nativeAuthenticated, nativePlatform],
   );
 
   const dispatchShellEvent = useCallback((event: WebShellEvent) => {
@@ -235,6 +326,35 @@ export function NativeWebShell() {
     );
   }, []);
 
+  const syncSafeAreaBackground = useCallback(() => {
+    webViewRef.current?.injectJavaScript(`
+      (function () {
+        var root = document.documentElement;
+        if (!root || !window.ReactNativeWebView) return true;
+        var background = window.getComputedStyle(root)
+          .getPropertyValue('--background').trim();
+        if (/^#[0-9a-f]{6}$/i.test(background)) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            source: 'naghshman-web',
+            version: 1,
+            type: 'set-safe-area-background',
+            color: background
+          }));
+        }
+        return true;
+      })();
+    `);
+  }, []);
+
+  const setNativeAuthentication = useCallback((authenticated: boolean) => {
+    webViewRef.current?.injectJavaScript(`
+      window.dispatchEvent(new CustomEvent('naghshman:native-auth-state', {
+        detail: { authenticated: ${authenticated} }
+      }));
+      true;
+    `);
+  }, []);
+
   const saveMedia = useCallback(
     async (url: string, suppliedFilename?: string) => {
       if (Platform.OS !== "android") return;
@@ -291,20 +411,25 @@ export function NativeWebShell() {
           await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, action.token);
           restoreAttemptedToken.current = null;
           setStoredRefreshToken(action.token);
+          setNativeAuthentication(true);
           break;
         case "clear-refresh":
           await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
           restoreAttemptedToken.current = null;
           setStoredRefreshToken(null);
+          setNativeAuthentication(false);
           break;
       }
     },
-    [saveMedia, showNotice],
+    [saveMedia, setNativeAuthentication, showNotice],
   );
 
   const handleLoadEnd = useCallback(
     (event: { nativeEvent: { url: string } }) => {
       setLoading(false);
+      // The initial bootstrap can run before Next has applied its theme CSS.
+      // Reading after document load makes the first safe-area color deterministic.
+      syncSafeAreaBackground();
 
       if (
         !nativePlatform ||
@@ -322,7 +447,7 @@ export function NativeWebShell() {
       true;
     `);
     },
-    [nativePlatform, storedRefreshToken],
+    [nativePlatform, storedRefreshToken, syncSafeAreaBackground],
   );
 
   const handleLoadStart = useCallback(
@@ -358,16 +483,29 @@ export function NativeWebShell() {
   }, [dispatchShellEvent]);
 
   const shouldStartLoad = useCallback((request: WebViewNavigation) => {
-    if (request.url === "about:blank" || isAllowedWebUrl(request.url))
+    if (request.url === "about:blank") return true;
+    if (!isAllowedWebUrl(request.url)) {
+      void Linking.openURL(request.url);
+      return false;
+    }
+    if (
+      nativePlatform &&
+      !nativeAuthenticated &&
+      !shouldAllowNativeGuestNavigation(request.url, APP_URL)
+    ) {
+      webViewRef.current?.injectJavaScript("window.location.replace('/auth'); true;");
+      return false;
+    }
+    if (isAllowedWebUrl(request.url))
       return true;
-    void Linking.openURL(request.url);
     return false;
-  }, []);
+  }, [nativeAuthenticated, nativePlatform]);
 
-  const webView = (
+  const webView = nativeAuthStateResolved && initialWebUrl ? (
     <WebView
       ref={webViewRef}
-      source={{ uri: APP_URL }}
+      source={{ uri: initialWebUrl }}
+      applicationNameForUserAgent="NaghshmanNative/1"
       injectedJavaScriptBeforeContentLoaded={bootstrap}
       injectedJavaScript={bootstrap}
       javaScriptEnabled
@@ -396,7 +534,7 @@ export function NativeWebShell() {
       }}
       style={styles.webView}
     />
-  );
+  ) : null;
 
   return (
     <View style={[styles.container, { backgroundColor: safeAreaBackground }]}>
