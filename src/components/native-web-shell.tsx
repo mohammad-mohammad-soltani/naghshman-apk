@@ -293,7 +293,6 @@ export function NativeWebShell() {
   const [shellState, setShellState] = useState(INITIAL_WEB_SHELL_STATE);
   const [loading, setLoading] = useState(false);
   const [webViewGeneration, setWebViewGeneration] = useState(0);
-  const [splashGeneration, setSplashGeneration] = useState(0);
   const [splashOverlayMounted, setSplashOverlayMounted] = useState(true);
   const [nativeSplashReleased, setNativeSplashReleased] = useState(false);
   const [safeAreaBackground, setSafeAreaBackground] =
@@ -750,12 +749,6 @@ export function NativeWebShell() {
       webViewDocumentReady.current = false;
       completedDocumentUrl.current = null;
       initialAttemptHadError.current = false;
-      if (shellStateRef.current.initialReady) {
-        // Full-document navigation uses the same loader, not a second top bar.
-        setLoading(true);
-        setSplashGeneration((generation) => generation + 1);
-        setSplashOverlayMounted(true);
-      }
     },
     [],
   );
@@ -776,19 +769,10 @@ export function NativeWebShell() {
 
   const handlePageFailure = useCallback(() => {
     loadAttempt.current += 1;
-    // Bring back a freshly mounted branded overlay if the previous one has
-    // already faded out after a successful navigation.
-    if (
-      shellStateRef.current.initialReady &&
-      !shellStateRef.current.documentFailed
-    ) {
-      setSplashGeneration((generation) => generation + 1);
-    }
     initialAttemptHadError.current = true;
     completedDocumentUrl.current = null;
     webViewDocumentReady.current = false;
     setLoading(false);
-    setSplashOverlayMounted(true);
     dispatchShellEvent({ type: "load-failed" });
   }, [dispatchShellEvent]);
 
@@ -841,9 +825,8 @@ export function NativeWebShell() {
 
   const launchSplashVisible = isLaunchSplashVisible(
     shellState.initialReady,
-    loading,
     nativeSplashReleased,
-  ) || shellState.documentFailed;
+  );
   const displayedStatusBarBackground = splashOverlayMounted
     ? LAUNCH_BACKGROUND
     : safeAreaBackground;
@@ -875,7 +858,7 @@ export function NativeWebShell() {
         onLoadEnd={handleLoadEnd}
         onError={handleWebViewError}
         // Replace react-native-webview's white diagnostic error screen.
-        // The full-screen branded overlay supplies the recovery UI.
+        // The initial launch overlay covers errors before the first ready page.
         renderError={() => <View style={styles.webViewErrorFallback} />}
         onHttpError={(event) => {
           if (
@@ -914,7 +897,6 @@ export function NativeWebShell() {
         </View>
       </SafeAreaView>
       <LaunchSplash
-        key={splashGeneration}
         visible={launchSplashVisible}
         onReady={hideNativeSplash}
         onHidden={handleSplashHidden}
