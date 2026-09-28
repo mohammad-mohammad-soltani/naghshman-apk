@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Asset } from 'expo-asset';
 import {
   AccessibilityInfo,
   Animated,
   StyleSheet,
   View,
 } from 'react-native';
-import { SvgUri } from 'react-native-svg';
+import Svg, { Image as SvgImage, SvgXml } from 'react-native-svg';
+import artwork from '../../assets/images/massage.generated.json';
 
 import { isNativeSplashReady } from '@/lib/launch-splash-visibility';
 import {
@@ -17,9 +17,6 @@ import {
 const DOT_IDLE_OPACITY = 0.4;
 const FADE_DURATION_MS = 260;
 const ARTWORK_BACKGROUND = '#c03636';
-const ARTWORK_URI = Asset.fromModule(
-  require('../../assets/images/massage.svg'),
-).uri;
 
 type LaunchSplashProps = {
   visible: boolean;
@@ -120,14 +117,24 @@ export function LaunchSplash({
       }}
       style={styles.overlay}
     >
-      <SvgUri
+      <Svg
         width="100%"
         height="100%"
         preserveAspectRatio="xMidYMid slice"
-        uri={ARTWORK_URI}
-        onLoad={handleArtworkLoaded}
+        viewBox="0 0 440 956"
         style={styles.artwork}
-      />
+      >
+        <SvgXml xml={artwork.vectors} width={440} height={956} />
+        <SvgImage
+          x={56}
+          y={287}
+          width={318}
+          height={318}
+          href={artwork.image}
+          preserveAspectRatio="xMidYMid meet"
+          onLoad={handleArtworkLoaded}
+        />
+      </Svg>
       <View
         style={[
           styles.dots,

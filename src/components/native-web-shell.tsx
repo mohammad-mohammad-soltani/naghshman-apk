@@ -1,7 +1,7 @@
 import * as Clipboard from "expo-clipboard";
 import Constants from "expo-constants";
-import { NavigationBar } from "expo-navigation-bar";
 import { File, Paths } from "expo-file-system";
+import { NavigationBar } from "expo-navigation-bar";
 import { useNetworkState } from "expo-network";
 import * as SecureStore from "expo-secure-store";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -22,7 +22,6 @@ import {
 } from "react-native-webview";
 
 import { LaunchSplash } from "@/components/launch-splash";
-import { isCurrentDocumentReady, webDocumentReadyScript } from "@/lib/web-document-ready";
 import { isInitialWebDocument } from "@/lib/initial-web-document";
 import { isLaunchSplashVisible } from "@/lib/launch-splash-visibility";
 import {
@@ -35,6 +34,10 @@ import {
   nativeNotificationRoute,
   supportsNativePushNotifications,
 } from "@/lib/native-push";
+import {
+  isCurrentDocumentReady,
+  webDocumentReadyScript,
+} from "@/lib/web-document-ready";
 import {
   INITIAL_WEB_SHELL_STATE,
   reduceWebShellState,
@@ -162,7 +165,7 @@ function nativeBootstrap(
         if (!root) return;
         var background = window.getComputedStyle(root)
           .getPropertyValue('--background').trim();
-        var theme = root.classList.contains('dark') ? 'dark' : 'light';
+        var theme = root.classList.contains('dark') || root.classList.contains('black') || window.getComputedStyle(root).colorScheme === 'dark' ? 'dark' : 'light';
         var backgroundKey = theme + ':' + background;
         if (/^#[0-9a-f]{6}$/i.test(background) && backgroundKey !== lastBackground) {
           lastBackground = backgroundKey;
@@ -242,7 +245,9 @@ function nativeBootstrap(
         var root = document.documentElement;
         if (!root) return;
         var guestStyle = document.createElement('style');
-        guestStyle.textContent = '[data-naghshman-native-guest="true"] #bottomNavBar { display: none !important; }';
+        // SafeAreaView already excludes the system navigation area from the
+        // WebView. Keep the site's ordinary padding without adding that inset again.
+        guestStyle.textContent = '#bottomNavBar { padding-bottom: .5rem !important; } [data-naghshman-native-guest="true"] #bottomNavBar { display: none !important; }';
         (document.head || root).appendChild(guestStyle);
         syncGuestNavigation();
       };
@@ -510,7 +515,8 @@ export function NativeWebShell() {
     if (
       !shellStateRef.current.documentFailed &&
       shellStateRef.current.initialReady
-    ) return;
+    )
+      return;
 
     dispatchShellEvent({ type: "retry-started" });
     loadAttempt.current += 1;
@@ -573,7 +579,7 @@ export function NativeWebShell() {
             version: 1,
             type: 'set-safe-area-background',
             color: background,
-            theme: root.classList.contains('dark') ? 'dark' : 'light'
+            theme: root.classList.contains('dark') || root.classList.contains('black') || window.getComputedStyle(root).colorScheme === 'dark' ? 'dark' : 'light'
           }));
         }
         return true;
@@ -638,7 +644,14 @@ export function NativeWebShell() {
     async (event: WebViewMessageEvent) => {
       try {
         const message: unknown = JSON.parse(event.nativeEvent.data);
-        if (isCurrentDocumentReady(message, loadAttempt.current, completedDocumentUrl.current, initialAttemptHadError.current)) {
+        if (
+          isCurrentDocumentReady(
+            message,
+            loadAttempt.current,
+            completedDocumentUrl.current,
+            initialAttemptHadError.current,
+          )
+        ) {
           setLoading(false);
           dispatchShellEvent({ type: "load-succeeded" });
           retryDelayMs.current = 4000;
@@ -703,7 +716,8 @@ export function NativeWebShell() {
       if (
         initialAttemptHadError.current ||
         completedDocumentUrl.current !== event.nativeEvent.url
-      ) return;
+      )
+        return;
 
       webViewDocumentReady.current = true;
       // The initial bootstrap can run before Next has applied its theme CSS.
@@ -720,7 +734,9 @@ export function NativeWebShell() {
         return;
       }
 
-      webViewRef.current?.injectJavaScript(webDocumentReadyScript(loadAttempt.current));
+      webViewRef.current?.injectJavaScript(
+        webDocumentReadyScript(loadAttempt.current),
+      );
 
       if (
         !nativePlatform ||
@@ -759,19 +775,16 @@ export function NativeWebShell() {
     [],
   );
 
-  const handleLoad = useCallback(
-    (event: { nativeEvent: { url: string } }) => {
-      if (
-        !initialAttemptHadError.current &&
-        event.nativeEvent.url === mainDocumentUrl.current &&
-        isInitialWebDocument(event.nativeEvent.url)
-      ) {
-        completedDocumentUrl.current = event.nativeEvent.url;
-        // Only the full artwork's layout + image load can release the OS splash.
-      }
-    },
-    [],
-  );
+  const handleLoad = useCallback((event: { nativeEvent: { url: string } }) => {
+    if (
+      !initialAttemptHadError.current &&
+      event.nativeEvent.url === mainDocumentUrl.current &&
+      isInitialWebDocument(event.nativeEvent.url)
+    ) {
+      completedDocumentUrl.current = event.nativeEvent.url;
+      // Only the full artwork's layout + image load can release the OS splash.
+    }
+  }, []);
 
   const handlePageFailure = useCallback(() => {
     loadAttempt.current += 1;
@@ -784,13 +797,25 @@ export function NativeWebShell() {
 
   // A stalled load or renderer must recover without ever revealing partial content.
   useEffect(() => {
-    if (!initialWebUrl || shellState.documentFailed || (!loading && shellState.initialReady)) return;
+    if (
+      !initialWebUrl ||
+      shellState.documentFailed ||
+      (!loading && shellState.initialReady)
+    )
+      return;
     const timer = setTimeout(() => {
       handlePageFailure();
       webViewRef.current?.stopLoading();
     }, 45000);
     return () => clearTimeout(timer);
-  }, [handlePageFailure, initialWebUrl, loading, shellState.documentFailed, shellState.initialReady, webViewGeneration]);
+  }, [
+    handlePageFailure,
+    initialWebUrl,
+    loading,
+    shellState.documentFailed,
+    shellState.initialReady,
+    webViewGeneration,
+  ]);
 
   const handleWebViewError = useCallback(
     (event: { nativeEvent: { url?: string }; preventDefault: () => void }) => {
@@ -852,6 +877,8 @@ export function NativeWebShell() {
         thirdPartyCookiesEnabled
         cacheEnabled
         pullToRefreshEnabled={false}
+        automaticallyAdjustContentInsets={false}
+        contentInsetAdjustmentBehavior="never"
         renderLoading={() => <View style={styles.webViewErrorFallback} />}
         originWhitelist={["https://*"]}
         onMessage={(event) => void handleMessage(event)}
@@ -891,16 +918,20 @@ export function NativeWebShell() {
       <StatusBar
         hidden={splashOverlayMounted}
         backgroundColor={displayedStatusBarBackground}
-        barStyle={splashOverlayMounted ? "light-content" : statusBarStyleFor(safeAreaBackground)}
+        barStyle={
+          splashOverlayMounted
+            ? "light-content"
+            : statusBarStyleFor(safeAreaBackground)
+        }
       />
-      {Platform.OS === "android" && <NavigationBar hidden={splashOverlayMounted} />}
+      {Platform.OS === "android" && (
+        <NavigationBar hidden={splashOverlayMounted} />
+      )}
       <SafeAreaView
         edges={["top", "bottom"]}
         style={[styles.safeArea, { backgroundColor: safeAreaBackground }]}
       >
-        <View style={styles.webFrame}>
-          {webView}
-        </View>
+        <View style={styles.webFrame}>{webView}</View>
       </SafeAreaView>
       <LaunchSplash
         visible={launchSplashVisible}

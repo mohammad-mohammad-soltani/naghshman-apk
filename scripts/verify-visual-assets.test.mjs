@@ -9,7 +9,7 @@ const root = new URL('../', import.meta.url);
 test('covers the screen with the portrait artwork without stretching its motif', () => {
   const source = readFileSync(new URL('src/components/launch-splash.tsx', root), 'utf8');
 
-  assert.match(source, /massage\.svg/);
+  assert.match(source, /massage\.generated\.json/);
   assert.doesNotMatch(source, /splash-dotless\.jpg/);
   assert.match(source, /preserveAspectRatio="xMidYMid slice"/);
   assert.doesNotMatch(source, /resizeMode="stretch"/);
@@ -93,6 +93,6 @@ test('replaces the WebView diagnostic page with a retryable branded overlay', ()
 test('uses a white safe area in light mode and the document color in dark mode', () => {
   const shell = readFileSync(new URL('src/components/native-web-shell.tsx', root), 'utf8');
 
-  assert.match(shell, /theme: root\.classList\.contains\('dark'\) \? 'dark' : 'light'/);
+  assert.match(shell, /root\.classList\.contains\('black'\)/);
   assert.match(shell, /action\.theme === "light" \? "#ffffff" : action\.color/);
 });
