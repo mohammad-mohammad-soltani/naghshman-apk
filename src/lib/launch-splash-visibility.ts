@@ -1,9 +1,8 @@
 export function isLaunchSplashVisible(
   initialReady: boolean,
-  navigationLoading = false,
-  nativeSplashReleased = true,
+  nativeSplashReleased: boolean,
 ): boolean {
-  return !initialReady || navigationLoading || !nativeSplashReleased;
+  return !initialReady || !nativeSplashReleased;
 }
 
 // Do not reveal the platform splash until the branded full-screen overlay
