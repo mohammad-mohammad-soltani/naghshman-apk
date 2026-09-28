@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { Asset } from 'expo-asset';
 import {
   AccessibilityInfo,
   Animated,
-  Image,
   StyleSheet,
   View,
 } from 'react-native';
+import { SvgUri } from 'react-native-svg';
 
 import { isNativeSplashReady } from '@/lib/launch-splash-visibility';
 import {
@@ -16,6 +17,9 @@ import {
 const DOT_IDLE_OPACITY = 0.4;
 const FADE_DURATION_MS = 260;
 const ARTWORK_BACKGROUND = '#c03636';
+const ARTWORK_URI = Asset.fromModule(
+  require('../../assets/images/massage.svg'),
+).uri;
 
 type LaunchSplashProps = {
   visible: boolean;
@@ -36,6 +40,7 @@ export function LaunchSplash({
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [artworkLaidOut, setArtworkLaidOut] = useState(false);
   const [artworkLoaded, setArtworkLoaded] = useState(false);
+  const handleArtworkLoaded = useCallback(() => setArtworkLoaded(true), []);
 
   useEffect(() => {
     if (isNativeSplashReady(artworkLaidOut, artworkLoaded)) onReady();
@@ -115,20 +120,35 @@ export function LaunchSplash({
       }}
       style={styles.overlay}
     >
-      <Image
-        resizeMode="cover"
-        source={require('../../assets/images/splash-dotless.jpg')}
-        onLoad={() => setArtworkLoaded(true)}
+      <SvgUri
+        width="100%"
+        height="100%"
+        preserveAspectRatio="xMidYMid slice"
+        uri={ARTWORK_URI}
+        onLoad={handleArtworkLoaded}
         style={styles.artwork}
       />
-        <View style={[styles.dots, { left: dotsLeft, top: dotsTop, gap: 17 * scale }]}>
-          {dotOpacities.map((opacity, index) => (
-            <Animated.View
-              key={index}
-              style={[styles.dot, { opacity, width: dotSize, height: dotSize, borderRadius: dotSize / 2 }]}
-            />
-          ))}
-        </View>
+      <View
+        style={[
+          styles.dots,
+          { left: dotsLeft, top: dotsTop, gap: 17 * scale },
+        ]}
+      >
+        {dotOpacities.map((opacity, index) => (
+          <Animated.View
+            key={index}
+            style={[
+              styles.dot,
+              {
+                opacity,
+                width: dotSize,
+                height: dotSize,
+                borderRadius: dotSize / 2,
+              },
+            ]}
+          />
+        ))}
+      </View>
     </Animated.View>
   );
 }

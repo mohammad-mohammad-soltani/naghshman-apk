@@ -162,14 +162,17 @@ function nativeBootstrap(
         if (!root) return;
         var background = window.getComputedStyle(root)
           .getPropertyValue('--background').trim();
-        if (/^#[0-9a-f]{6}$/i.test(background) && background !== lastBackground) {
-          lastBackground = background;
+        var theme = root.classList.contains('dark') ? 'dark' : 'light';
+        var backgroundKey = theme + ':' + background;
+        if (/^#[0-9a-f]{6}$/i.test(background) && backgroundKey !== lastBackground) {
+          lastBackground = backgroundKey;
           if (window.ReactNativeWebView && typeof window.ReactNativeWebView.postMessage === 'function') {
             window.ReactNativeWebView.postMessage(JSON.stringify({
               source: 'naghshman-web',
               version: 1,
               type: 'set-safe-area-background',
-              color: background
+              color: background,
+              theme: theme
             }));
           }
         }
@@ -569,7 +572,8 @@ export function NativeWebShell() {
             source: 'naghshman-web',
             version: 1,
             type: 'set-safe-area-background',
-            color: background
+            color: background,
+            theme: root.classList.contains('dark') ? 'dark' : 'light'
           }));
         }
         return true;
@@ -648,7 +652,9 @@ export function NativeWebShell() {
 
       switch (action.type) {
         case "set-safe-area-background":
-          setSafeAreaBackground(action.color);
+          setSafeAreaBackground(
+            action.theme === "light" ? "#ffffff" : action.color,
+          );
           break;
         case "save-media":
           await saveMedia(action.url, action.filename);

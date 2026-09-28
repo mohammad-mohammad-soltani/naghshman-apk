@@ -9,7 +9,9 @@ const root = new URL('../', import.meta.url);
 test('covers the screen with the portrait artwork without stretching its motif', () => {
   const source = readFileSync(new URL('src/components/launch-splash.tsx', root), 'utf8');
 
-  assert.match(source, /resizeMode="cover"/);
+  assert.match(source, /massage\.svg/);
+  assert.doesNotMatch(source, /splash-dotless\.jpg/);
+  assert.match(source, /preserveAspectRatio="xMidYMid slice"/);
   assert.doesNotMatch(source, /resizeMode="stretch"/);
   assert.doesNotMatch(source, /useWindowDimensions/);
   assert.doesNotMatch(source, /artworkSize/);
@@ -86,4 +88,11 @@ test('replaces the WebView diagnostic page with a retryable branded overlay', ()
   assert.match(shell, /completedDocumentUrl\.current !== event\.nativeEvent\.url/);
   assert.match(shell, /onRenderProcessGone/);
   assert.doesNotMatch(splash, /errorPanel|Pressable|ActivityIndicator/);
+});
+
+test('uses a white safe area in light mode and the document color in dark mode', () => {
+  const shell = readFileSync(new URL('src/components/native-web-shell.tsx', root), 'utf8');
+
+  assert.match(shell, /theme: root\.classList\.contains\('dark'\) \? 'dark' : 'light'/);
+  assert.match(shell, /action\.theme === "light" \? "#ffffff" : action\.color/);
 });

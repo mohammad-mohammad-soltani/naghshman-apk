@@ -54,13 +54,16 @@ test('accepts only an opaque hex safe-area background', () => {
     version: 1,
     type: 'set-safe-area-background',
     color: '#1f1f1f',
+    theme: 'dark',
   });
 
   assert.deepEqual(parseNativeBridgeMessage(valid), {
     type: 'set-safe-area-background',
     color: '#1f1f1f',
+    theme: 'dark',
   });
   assert.equal(parseNativeBridgeMessage(valid.replace('#1f1f1f', 'rgb(0, 0, 0)')), null);
+  assert.equal(parseNativeBridgeMessage(valid.replace('dark', 'system')), null);
 });
 
 test('rejects forged, malformed, and unsafe bridge requests', () => {
