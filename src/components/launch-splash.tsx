@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   AccessibilityInfo,
   Animated,
@@ -13,7 +13,6 @@ import {
   RIGHT_TO_LEFT_DOT_ORDER,
   STATIC_REDUCED_MOTION_OPACITIES,
 } from "@/lib/launch-splash-timing";
-import { isNativeSplashReady } from "@/lib/launch-splash-visibility";
 
 const DOT_IDLE_OPACITY = 0.4;
 const FADE_DURATION_MS = 260;
@@ -45,18 +44,6 @@ export function LaunchSplash({
   ]);
 
   const [screenWidth, setScreenWidth] = useState(0);
-  const [artworkLaidOut, setArtworkLaidOut] = useState(false);
-  const [artworkLoaded, setArtworkLoaded] = useState(false);
-
-  const handleArtworkLoaded = useCallback(() => {
-    setArtworkLoaded(true);
-  }, []);
-
-  useEffect(() => {
-    if (isNativeSplashReady(artworkLaidOut, artworkLoaded)) {
-      onReady();
-    }
-  }, [artworkLaidOut, artworkLoaded, onReady]);
 
   /**
    * انیمیشن سه نقطه
@@ -142,6 +129,11 @@ export function LaunchSplash({
 
         if (width > 0) {
           setScreenWidth(width);
+
+          // The React splash is now physically laid out behind the OS splash.
+          // Release the native splash here instead of waiting for SvgImage.onLoad,
+          // which is not guaranteed to fire in every Android release build.
+          onReady();
         }
       }}
     >
@@ -154,9 +146,6 @@ export function LaunchSplash({
               height: screenWidth * (ARTWORK_HEIGHT / ARTWORK_WIDTH),
             },
           ]}
-          onLayout={() => {
-            setArtworkLaidOut(true);
-          }}
         >
           <Svg
             width="100%"
@@ -175,7 +164,6 @@ export function LaunchSplash({
               {...artwork.image.frame}
               href={artwork.image.uri}
               preserveAspectRatio="xMidYMid meet"
-              onLoad={handleArtworkLoaded}
             />
           </Svg>
 

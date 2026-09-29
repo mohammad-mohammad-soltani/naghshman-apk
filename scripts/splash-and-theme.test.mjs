@@ -53,3 +53,13 @@ test('native shell enables hardware rendering and strips the expensive blur anim
   assert.match(source, /filter: none !important/);
   assert.match(source, /will-change: transform, opacity/);
 });
+
+
+test('releases the OS splash from the React overlay layout without waiting for SVG image load', () => {
+  const source = readFileSync(new URL('src/components/launch-splash.tsx', root), 'utf8');
+  assert.match(source, /onLayout=\{\(\{ nativeEvent \}\) => \{/);
+  assert.match(source, /if \(width > 0\)[\s\S]*onReady\(\)/);
+  assert.doesNotMatch(source, /onLoad=\{handleArtworkLoaded\}/);
+  assert.doesNotMatch(source, /artworkLoaded/);
+  assert.doesNotMatch(source, /isNativeSplashReady/);
+});
