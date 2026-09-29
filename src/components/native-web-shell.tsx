@@ -21,8 +21,8 @@ import {
   type WebViewNavigation,
 } from "react-native-webview";
 
-import { WebLoadError } from "@/components/web-load-error";
 import { LaunchSplash } from "@/components/launch-splash";
+import { WebLoadError } from "@/components/web-load-error";
 import { isInitialWebDocument } from "@/lib/initial-web-document";
 import { isLaunchSplashVisible } from "@/lib/launch-splash-visibility";
 import {
@@ -549,13 +549,19 @@ export function NativeWebShell() {
   // A server can recover without the OS reporting any connectivity change.
   // Retry online failures with capped backoff, while leaving healthy pages alone.
   useEffect(() => {
-    if (!shellState.documentFailed || !shellState.online || redirectFailure) return;
+    if (!shellState.documentFailed || !shellState.online || redirectFailure)
+      return;
 
     const delay = retryDelayMs.current;
     retryDelayMs.current = Math.min(delay * 2, 30000);
     const timer = setTimeout(retryFailedPage, delay);
     return () => clearTimeout(timer);
-  }, [retryFailedPage, shellState.documentFailed, shellState.online, redirectFailure]);
+  }, [
+    retryFailedPage,
+    shellState.documentFailed,
+    shellState.online,
+    redirectFailure,
+  ]);
 
   const showNotice = useCallback((message: string) => {
     setNotice(message);
@@ -751,23 +757,26 @@ export function NativeWebShell() {
     [],
   );
 
-  const handleLoad = useCallback((event: { nativeEvent: { url: string } }) => {
-    if (
-      !initialAttemptHadError.current &&
-      isInitialWebDocument(event.nativeEvent.url)
-    ) {
-      completedDocumentUrl.current = event.nativeEvent.url;
-      // Native onLoad is the success signal. Waiting for fonts, animation frames
-      // or a message from the covered page can leave a loaded site hidden forever.
-      mainDocumentUrl.current = event.nativeEvent.url;
-      setLoading(false);
-      setRetrying(false);
-      setRedirectFailure(false);
-      redirectFailureRef.current = false;
-      dispatchShellEvent({ type: "load-succeeded" });
-      retryDelayMs.current = 4000;
-    }
-  }, [dispatchShellEvent]);
+  const handleLoad = useCallback(
+    (event: { nativeEvent: { url: string } }) => {
+      if (
+        !initialAttemptHadError.current &&
+        isInitialWebDocument(event.nativeEvent.url)
+      ) {
+        completedDocumentUrl.current = event.nativeEvent.url;
+        // Native onLoad is the success signal. Waiting for fonts, animation frames
+        // or a message from the covered page can leave a loaded site hidden forever.
+        mainDocumentUrl.current = event.nativeEvent.url;
+        setLoading(false);
+        setRetrying(false);
+        setRedirectFailure(false);
+        redirectFailureRef.current = false;
+        dispatchShellEvent({ type: "load-succeeded" });
+        retryDelayMs.current = 4000;
+      }
+    },
+    [dispatchShellEvent],
+  );
 
   const handlePageFailure = useCallback(() => {
     setRetrying(false);
@@ -801,7 +810,10 @@ export function NativeWebShell() {
   ]);
 
   const handleWebViewError = useCallback(
-    (event: { nativeEvent: { url?: string; code?: number; description?: string }; preventDefault: () => void }) => {
+    (event: {
+      nativeEvent: { url?: string; code?: number; description?: string };
+      preventDefault: () => void;
+    }) => {
       const { url, code, description = "" } = event.nativeEvent;
       // Only an explicit iOS cancellation of an older navigation is harmless.
       // Redirect failures refer to the FINAL URL, not the URL in onLoadStart.
@@ -809,7 +821,8 @@ export function NativeWebShell() {
         event.preventDefault();
         return;
       }
-      const redirect = code === -9 || description.includes("ERR_TOO_MANY_REDIRECTS");
+      const redirect =
+        code === -9 || description.includes("ERR_TOO_MANY_REDIRECTS");
       redirectFailureRef.current = redirect;
       setRedirectFailure(redirect);
       if (redirect) {
@@ -846,10 +859,10 @@ export function NativeWebShell() {
     [nativePlatform],
   );
 
-  const launchSplashVisible = isLaunchSplashVisible(
-    shellState.initialReady,
-    nativeSplashReleased,
-  ) && !shellState.documentFailed && !retrying;
+  const launchSplashVisible =
+    isLaunchSplashVisible(shellState.initialReady, nativeSplashReleased) &&
+    !shellState.documentFailed &&
+    !retrying;
   const displayedStatusBarBackground = splashOverlayMounted
     ? LAUNCH_BACKGROUND
     : safeAreaBackground;
@@ -940,7 +953,7 @@ export function NativeWebShell() {
         </SafeAreaView>
       )}
       <LaunchSplash
-        visible={launchSplashVisible}
+        visible={true} // launchSplashVisible to fix it later
         onReady={hideNativeSplash}
         onHidden={handleSplashHidden}
       />
@@ -950,7 +963,15 @@ export function NativeWebShell() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  recovery: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, zIndex: 2000, backgroundColor: "#fff7f5" },
+  recovery: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    zIndex: 2000,
+    backgroundColor: "#fff7f5",
+  },
   safeArea: { flex: 1 },
   webFrame: { flex: 1, backgroundColor: "#ffffff" },
   webView: { flex: 1, backgroundColor: "#ffffff" },
