@@ -48,6 +48,7 @@ const APP_URL = "https://naghshman.ir";
 const REFRESH_TOKEN_KEY = "naghshman.refresh-token";
 const BRAND_BACKGROUND = "#dc2626";
 const LAUNCH_BACKGROUND = "#c03636";
+const MIN_CUSTOM_SPLASH_MS = 2000;
 
 type NotificationsModule = typeof import("expo-notifications");
 
@@ -152,6 +153,74 @@ function nativeBootstrap(
       }).catch(function () {});
     });
     window.dispatchEvent(new Event('naghshman:native-ready'));
+    }
+
+    if (!window.__naghshmanLaunchMediaWarmup) {
+      window.__naghshmanLaunchMediaWarmup = true;
+
+      var warmLaunchMedia = function () {
+        var viewportHeight = Math.max(window.innerHeight || 0, 640);
+        var maxDistance = viewportHeight * 2;
+        var warmedImages = 0;
+        var warmedVideos = 0;
+
+        Array.prototype.forEach.call(document.images || [], function (image) {
+          if (warmedImages >= 8 || image.dataset.naghshmanLaunchWarmed === '1') return;
+
+          var rect = image.getBoundingClientRect();
+          if (rect.bottom < -viewportHeight || rect.top > maxDistance) return;
+
+          image.dataset.naghshmanLaunchWarmed = '1';
+          image.loading = 'eager';
+          try { image.fetchPriority = 'high'; } catch (error) {}
+          if (typeof image.decode === 'function') {
+            image.decode().catch(function () {});
+          }
+          warmedImages += 1;
+        });
+
+        Array.prototype.forEach.call(document.querySelectorAll('video'), function (video) {
+          if (warmedVideos >= 2 || video.dataset.naghshmanLaunchWarmed === '1') return;
+
+          var rect = video.getBoundingClientRect();
+          if (rect.bottom < -viewportHeight || rect.top > viewportHeight * 1.5) return;
+
+          video.dataset.naghshmanLaunchWarmed = '1';
+          video.preload = 'auto';
+          try {
+            if (video.readyState === 0) video.load();
+          } catch (error) {}
+          warmedVideos += 1;
+        });
+      };
+
+      var scheduleLaunchMediaWarmup = function () {
+        if (typeof window.requestAnimationFrame === 'function') {
+          window.requestAnimationFrame(warmLaunchMedia);
+        } else {
+          window.setTimeout(warmLaunchMedia, 0);
+        }
+      };
+
+      var startLaunchMediaWarmup = function () {
+        scheduleLaunchMediaWarmup();
+
+        var observer = new MutationObserver(scheduleLaunchMediaWarmup);
+        if (document.documentElement) {
+          observer.observe(document.documentElement, { childList: true, subtree: true });
+        }
+
+        window.setTimeout(function () {
+          observer.disconnect();
+          scheduleLaunchMediaWarmup();
+        }, 2600);
+      };
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', startLaunchMediaWarmup, { once: true });
+      } else {
+        startLaunchMediaWarmup();
+      }
     }
 
     if (!window.__naghshmanNativePerformanceStyle) {
@@ -362,6 +431,8 @@ export function NativeWebShell() {
   const [webViewGeneration, setWebViewGeneration] = useState(0);
   const [splashOverlayMounted, setSplashOverlayMounted] = useState(true);
   const [nativeSplashReleased, setNativeSplashReleased] = useState(false);
+  const [minimumCustomSplashElapsed, setMinimumCustomSplashElapsed] =
+    useState(false);
   const [safeAreaBackground, setSafeAreaBackground] = useState("#ffffff");
   const [notice, setNotice] = useState<string | null>(null);
   const [storedRefreshToken, setStoredRefreshToken] = useState<
@@ -404,6 +475,16 @@ export function NativeWebShell() {
   const handleSplashHidden = useCallback(() => {
     setSplashOverlayMounted(false);
   }, []);
+
+  useEffect(() => {
+    if (!nativeSplashReleased || minimumCustomSplashElapsed) return;
+
+    const timer = setTimeout(() => {
+      setMinimumCustomSplashElapsed(true);
+    }, MIN_CUSTOM_SPLASH_MS);
+
+    return () => clearTimeout(timer);
+  }, [minimumCustomSplashElapsed, nativeSplashReleased]);
 
   const dispatchShellEvent = useCallback((event: WebShellEvent) => {
     const next = reduceWebShellState(shellStateRef.current, event);
@@ -934,7 +1015,11 @@ export function NativeWebShell() {
   );
 
   const launchSplashVisible =
-    isLaunchSplashVisible(shellState.initialReady, nativeSplashReleased) &&
+    isLaunchSplashVisible(
+      shellState.initialReady,
+      nativeSplashReleased,
+      minimumCustomSplashElapsed,
+    ) &&
     !shellState.documentFailed &&
     !retrying;
   const systemChromeBackground = splashOverlayMounted

@@ -63,3 +63,20 @@ test('releases the OS splash from the React overlay layout without waiting for S
   assert.doesNotMatch(source, /artworkLoaded/);
   assert.doesNotMatch(source, /isNativeSplashReady/);
 });
+
+
+test('keeps the SVG splash visible for at least two seconds while the WebView warms visible media', () => {
+  const source = readFileSync(new URL('src/components/native-web-shell.tsx', root), 'utf8');
+
+  assert.match(source, /const MIN_CUSTOM_SPLASH_MS = 2000/);
+  assert.match(source, /if \(!nativeSplashReleased \|\| minimumCustomSplashElapsed\) return/);
+  assert.match(source, /setTimeout\(\(\) => \{[\s\S]*setMinimumCustomSplashElapsed\(true\)[\s\S]*MIN_CUSTOM_SPLASH_MS/);
+  assert.match(source, /isLaunchSplashVisible\([\s\S]*minimumCustomSplashElapsed/);
+
+  assert.match(source, /__naghshmanLaunchMediaWarmup/);
+  assert.match(source, /image\.loading = 'eager'/);
+  assert.match(source, /image\.fetchPriority = 'high'/);
+  assert.match(source, /video\.preload = 'auto'/);
+  assert.match(source, /warmedImages >= 8/);
+  assert.match(source, /warmedVideos >= 2/);
+});
