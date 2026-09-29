@@ -866,6 +866,8 @@ export function NativeWebShell() {
   const displayedStatusBarBackground = splashOverlayMounted
     ? LAUNCH_BACKGROUND
     : safeAreaBackground;
+  const lightWebTheme =
+    !splashOverlayMounted && safeAreaBackground === "#ffffff";
 
   const recovery = (
     <WebLoadError
@@ -939,7 +941,10 @@ export function NativeWebShell() {
         }
       />
       {Platform.OS === "android" && (
-        <NavigationBar hidden={splashOverlayMounted} />
+        <NavigationBar
+          hidden={splashOverlayMounted}
+          style={lightWebTheme ? "light" : "dark"}
+        />
       )}
       <SafeAreaView
         edges={["top", "bottom"]}
@@ -953,7 +958,7 @@ export function NativeWebShell() {
         </SafeAreaView>
       )}
       <LaunchSplash
-        visible={true} // launchSplashVisible to fix it later
+        visible={launchSplashVisible}
         onReady={hideNativeSplash}
         onHidden={handleSplashHidden}
       />
