@@ -21,6 +21,7 @@ import {
   type WebViewNavigation,
 } from "react-native-webview";
 
+import { WebLoadError } from "@/components/web-load-error";
 import { LaunchSplash } from "@/components/launch-splash";
 import { isInitialWebDocument } from "@/lib/initial-web-document";
 import { isLaunchSplashVisible } from "@/lib/launch-splash-visibility";
@@ -295,6 +296,9 @@ export function NativeWebShell() {
   const network = useNetworkState();
   const [shellState, setShellState] = useState(INITIAL_WEB_SHELL_STATE);
   const [loading, setLoading] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const [redirectFailure, setRedirectFailure] = useState(false);
+  const redirectFailureRef = useRef(false);
   const [webViewGeneration, setWebViewGeneration] = useState(0);
   const [splashOverlayMounted, setSplashOverlayMounted] = useState(true);
   const [nativeSplashReleased, setNativeSplashReleased] = useState(false);
@@ -513,6 +517,7 @@ export function NativeWebShell() {
     )
       return;
 
+    setRetrying(true);
     dispatchShellEvent({ type: "retry-started" });
     initialAttemptHadError.current = false;
     completedDocumentUrl.current = null;
@@ -533,7 +538,7 @@ export function NativeWebShell() {
     const retry = shouldRetryFailedLoad(shellStateRef.current, online);
 
     dispatchShellEvent({ type: "network-changed", online });
-    if (retry) retryFailedPage();
+    if (retry && !redirectFailureRef.current) retryFailedPage();
   }, [
     dispatchShellEvent,
     network.isConnected,
@@ -544,13 +549,13 @@ export function NativeWebShell() {
   // A server can recover without the OS reporting any connectivity change.
   // Retry online failures with capped backoff, while leaving healthy pages alone.
   useEffect(() => {
-    if (!shellState.documentFailed || !shellState.online) return;
+    if (!shellState.documentFailed || !shellState.online || redirectFailure) return;
 
     const delay = retryDelayMs.current;
     retryDelayMs.current = Math.min(delay * 2, 30000);
     const timer = setTimeout(retryFailedPage, delay);
     return () => clearTimeout(timer);
-  }, [retryFailedPage, shellState.documentFailed, shellState.online]);
+  }, [retryFailedPage, shellState.documentFailed, shellState.online, redirectFailure]);
 
   const showNotice = useCallback((message: string) => {
     setNotice(message);
@@ -756,12 +761,16 @@ export function NativeWebShell() {
       // or a message from the covered page can leave a loaded site hidden forever.
       mainDocumentUrl.current = event.nativeEvent.url;
       setLoading(false);
+      setRetrying(false);
+      setRedirectFailure(false);
+      redirectFailureRef.current = false;
       dispatchShellEvent({ type: "load-succeeded" });
       retryDelayMs.current = 4000;
     }
   }, [dispatchShellEvent]);
 
   const handlePageFailure = useCallback(() => {
+    setRetrying(false);
     initialAttemptHadError.current = true;
     completedDocumentUrl.current = null;
     webViewDocumentReady.current = false;
@@ -792,15 +801,24 @@ export function NativeWebShell() {
   ]);
 
   const handleWebViewError = useCallback(
-    (event: { nativeEvent: { url?: string }; preventDefault: () => void }) => {
-      const failedUrl = event.nativeEvent.url;
-      // Cancellation of an earlier redirected navigation is not a failure of
-      // the new top-level document (and must not replace its loading screen).
-      if (failedUrl && failedUrl !== mainDocumentUrl.current) {
+    (event: { nativeEvent: { url?: string; code?: number; description?: string }; preventDefault: () => void }) => {
+      const { url, code, description = "" } = event.nativeEvent;
+      // Only an explicit iOS cancellation of an older navigation is harmless.
+      // Redirect failures refer to the FINAL URL, not the URL in onLoadStart.
+      if (code === -999 && url && url !== mainDocumentUrl.current) {
         event.preventDefault();
         return;
       }
+      const redirect = code === -9 || description.includes("ERR_TOO_MANY_REDIRECTS");
+      redirectFailureRef.current = redirect;
+      setRedirectFailure(redirect);
+      if (redirect) {
+        // A fresh WebView starts at the clean source URL, not the recursive
+        // /auth?returnTo=/auth chain retained by WebView.reload().
+        webViewProcessDead.current = true;
+      }
       handlePageFailure();
+      // Do not preventDefault: WebView must replace its native error document.
     },
     [handlePageFailure],
   );
@@ -831,10 +849,19 @@ export function NativeWebShell() {
   const launchSplashVisible = isLaunchSplashVisible(
     shellState.initialReady,
     nativeSplashReleased,
-  );
+  ) && !shellState.documentFailed && !retrying;
   const displayedStatusBarBackground = splashOverlayMounted
     ? LAUNCH_BACKGROUND
     : safeAreaBackground;
+
+  const recovery = (
+    <WebLoadError
+      offline={!shellState.online}
+      redirect={redirectFailure}
+      retrying={retrying}
+      onRetry={retryFailedPage}
+    />
+  );
 
   const webView =
     nativeAuthStateResolved && initialWebUrl ? (
@@ -866,7 +893,7 @@ export function NativeWebShell() {
         onError={handleWebViewError}
         // Replace react-native-webview's white diagnostic error screen.
         // The initial launch overlay covers errors before the first ready page.
-        renderError={() => <View style={styles.webViewErrorFallback} />}
+        renderError={() => recovery}
         onHttpError={(event) => {
           if (
             event.nativeEvent.statusCode >= 400 &&
@@ -907,6 +934,11 @@ export function NativeWebShell() {
       >
         <View style={styles.webFrame}>{webView}</View>
       </SafeAreaView>
+      {(shellState.documentFailed || retrying) && (
+        <SafeAreaView style={styles.recovery} edges={["top", "bottom"]}>
+          {recovery}
+        </SafeAreaView>
+      )}
       <LaunchSplash
         visible={launchSplashVisible}
         onReady={hideNativeSplash}
@@ -918,6 +950,7 @@ export function NativeWebShell() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  recovery: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, zIndex: 2000, backgroundColor: "#fff7f5" },
   safeArea: { flex: 1 },
   webFrame: { flex: 1, backgroundColor: "#ffffff" },
   webView: { flex: 1, backgroundColor: "#ffffff" },
