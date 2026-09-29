@@ -5,11 +5,11 @@ export function isLaunchSplashVisible(
   return !initialReady || !nativeSplashReleased;
 }
 
-// Do not reveal the platform splash until the branded full-screen overlay
-// is both laid out and its bundled image has completed loading.
+// A failed image load event must not keep the platform splash up forever.
 export function isNativeSplashReady(
   artworkLaidOut: boolean,
   artworkLoaded: boolean,
+  imageWaitExpired = false,
 ): boolean {
-  return artworkLaidOut && artworkLoaded;
+  return artworkLaidOut && (artworkLoaded || imageWaitExpired);
 }

@@ -9,10 +9,9 @@ const root = new URL('../', import.meta.url);
 test('covers the screen with the portrait artwork without stretching its motif', () => {
   const source = readFileSync(new URL('src/components/launch-splash.tsx', root), 'utf8');
 
-  assert.match(source, /massage\.generated\.json/);
-  assert.doesNotMatch(source, /splash-dotless\.jpg/);
-  assert.match(source, /preserveAspectRatio="xMidYMid slice"/);
-  assert.doesNotMatch(source, /resizeMode="stretch"/);
+  assert.match(source, /source=\{require\('\.\.\/\.\.\/assets\/images\/splash-dotless\.jpg'\)\}/);
+  assert.match(source, /resizeMode="cover"/);
+  assert.doesNotMatch(source, /massage\.generated\.json|SvgXml|SvgImage/);
   assert.doesNotMatch(source, /useWindowDimensions/);
   assert.doesNotMatch(source, /artworkSize/);
   assert.match(source, /artwork:\s*\{[\s\S]*width:\s*'100%'[\s\S]*height:\s*'100%'/);
@@ -54,6 +53,7 @@ test('keeps the adaptive icon mark centered inside a 66 percent safe area', () =
 test('uses a square transparent floral mark rather than the portrait poster in the OS splash', () => {
   const config = JSON.parse(readFileSync(new URL('app.json', root), 'utf8'));
   const plugin = config.expo.plugins.find((entry) => Array.isArray(entry) && entry[0] === 'expo-splash-screen');
+  assert.ok(!config.expo.plugins.includes('./plugins/with-launch-splash.cjs'));
   assert.equal(plugin[1].image, './assets/images/native-floral-mark.png');
   assert.equal(plugin[1].backgroundColor, '#c03636');
 

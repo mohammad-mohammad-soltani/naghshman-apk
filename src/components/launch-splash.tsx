@@ -2,11 +2,10 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   AccessibilityInfo,
   Animated,
+  Image,
   StyleSheet,
   View,
 } from 'react-native';
-import Svg, { Image as SvgImage, SvgXml } from 'react-native-svg';
-import artwork from '../../assets/images/massage.generated.json';
 
 import { isNativeSplashReady } from '@/lib/launch-splash-visibility';
 import {
@@ -17,6 +16,7 @@ import {
 const DOT_IDLE_OPACITY = 0.4;
 const FADE_DURATION_MS = 260;
 const ARTWORK_BACKGROUND = '#c03636';
+const IMAGE_WAIT_MS = 1500;
 
 type LaunchSplashProps = {
   visible: boolean;
@@ -37,11 +37,19 @@ export function LaunchSplash({
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [artworkLaidOut, setArtworkLaidOut] = useState(false);
   const [artworkLoaded, setArtworkLoaded] = useState(false);
+  const [imageWaitExpired, setImageWaitExpired] = useState(false);
   const handleArtworkLoaded = useCallback(() => setArtworkLoaded(true), []);
 
   useEffect(() => {
-    if (isNativeSplashReady(artworkLaidOut, artworkLoaded)) onReady();
-  }, [artworkLaidOut, artworkLoaded, onReady]);
+    if (!visible || !artworkLaidOut || artworkLoaded) return;
+    const timer = setTimeout(() => setImageWaitExpired(true), IMAGE_WAIT_MS);
+    return () => clearTimeout(timer);
+  }, [visible, artworkLaidOut, artworkLoaded]);
+
+  useEffect(() => {
+    if (!isNativeSplashReady(artworkLaidOut, artworkLoaded, imageWaitExpired)) return;
+    onReady();
+  }, [artworkLaidOut, artworkLoaded, imageWaitExpired, onReady]);
 
   useEffect(() => {
     if (!visible) return;
@@ -117,24 +125,12 @@ export function LaunchSplash({
       }}
       style={styles.overlay}
     >
-      <Svg
-        width="100%"
-        height="100%"
-        preserveAspectRatio="xMidYMid slice"
-        viewBox="0 0 440 956"
+      <Image
+        source={require('../../assets/images/splash-dotless.jpg')}
+        resizeMode="cover"
         style={styles.artwork}
-      >
-        <SvgXml xml={artwork.vectors} width={440} height={956} />
-        <SvgImage
-          x={56}
-          y={287}
-          width={318}
-          height={318}
-          href={artwork.image}
-          preserveAspectRatio="xMidYMid meet"
-          onLoad={handleArtworkLoaded}
-        />
-      </Svg>
+        onLoad={handleArtworkLoaded}
+      />
       <View
         style={[
           styles.dots,
