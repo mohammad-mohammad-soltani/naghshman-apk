@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import plugin from '../plugins/with-launch-splash.cjs';
 
-test('removes the separate native logo and hides system bars during launch', () => {
+test('removes the separate native logo and keeps a branded status bar during launch', () => {
   const result = plugin.configureLaunchTheme({ resources: { style: [{
     $: { name: 'Theme.App.SplashScreen' },
     item: [
@@ -12,6 +12,8 @@ test('removes the separate native logo and hides system bars during launch', () 
   }] } });
   const values = Object.fromEntries(result.resources.style[0].item.map((entry) => [entry.$.name, entry._]));
   assert.equal(values.windowSplashScreenAnimatedIcon, '@android:color/transparent');
-  assert.equal(values['android:windowFullscreen'], 'true');
+  assert.equal(values['android:windowFullscreen'], 'false');
+  assert.equal(values['android:statusBarColor'], '#c03636');
+  assert.equal(values['android:windowLightStatusBar'], 'false');
   assert.equal(values.postSplashScreenTheme, '@style/AppTheme');
 });

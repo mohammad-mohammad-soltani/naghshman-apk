@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import {
   AccessibilityInfo,
   Animated,
-  StatusBar,
   StyleSheet,
   View,
 } from "react-native";
@@ -58,17 +57,6 @@ export function LaunchSplash({
       onReady();
     }
   }, [artworkLaidOut, artworkLoaded, onReady]);
-
-  /**
-   * Status bar مخصوص Splash
-   */
-  useEffect(() => {
-    if (!visible) return;
-
-    StatusBar.setBarStyle("light-content", true);
-    StatusBar.setBackgroundColor(ARTWORK_BACKGROUND, true);
-    StatusBar.setTranslucent(false);
-  }, [visible]);
 
   /**
    * انیمیشن سه نقطه

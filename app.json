@@ -30,7 +30,12 @@
     "plugins": [
       "expo-router",
       "./plugins/with-launch-splash.cjs",
-      ["expo-navigation-bar", { "hidden": true }],
+      [
+        "expo-navigation-bar",
+        {
+          "hidden": true
+        }
+      ],
       [
         "expo-splash-screen",
         {
@@ -84,6 +89,11 @@
       "eas": {
         "projectId": "e4788dfb-4695-40d8-bfa6-774aeae4e836"
       }
+    },
+    "androidStatusBar": {
+      "backgroundColor": "#c03636",
+      "barStyle": "light-content",
+      "translucent": false
     }
   }
 }

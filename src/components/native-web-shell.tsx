@@ -930,7 +930,7 @@ export function NativeWebShell() {
   return (
     <View style={[styles.container, { backgroundColor: safeAreaBackground }]}>
       <StatusBar
-        hidden={splashOverlayMounted}
+        hidden={false}
         backgroundColor={displayedStatusBarBackground}
         barStyle={
           splashOverlayMounted

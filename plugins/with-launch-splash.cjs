@@ -10,7 +10,9 @@ function configureLaunchTheme(resources) {
   theme.item ??= [];
   for (const [name, value] of Object.entries({
     windowSplashScreenAnimatedIcon: '@android:color/transparent',
-    'android:windowFullscreen': 'true',
+    'android:windowFullscreen': 'false',
+    'android:statusBarColor': '#c03636',
+    'android:windowLightStatusBar': 'false',
   })) {
     const item = theme.item.find((entry) => entry.$.name === name);
     if (item) item._ = value;
