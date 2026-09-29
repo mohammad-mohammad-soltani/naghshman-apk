@@ -21,9 +21,11 @@ test('does not fade away until the native-to-custom splash handoff resolves', ()
   assert.equal(isLaunchSplashVisible(true, true), false);
 });
 
-test('hands off the OS splash only after the branded artwork is laid out and loaded', () => {
+test('hands off the OS splash after layout even when image loading never reports completion', () => {
   assert.equal(isNativeSplashReady(false, false), false);
   assert.equal(isNativeSplashReady(true, false), false);
   assert.equal(isNativeSplashReady(false, true), false);
   assert.equal(isNativeSplashReady(true, true), true);
+  assert.equal(isNativeSplashReady(false, false, true), false);
+  assert.equal(isNativeSplashReady(true, false, true), true);
 });
