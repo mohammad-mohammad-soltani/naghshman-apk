@@ -10,13 +10,16 @@ test('covers the screen with the vector splash artwork without stretching its mo
   const source = readFileSync(new URL('src/components/launch-splash.tsx', root), 'utf8');
 
   assert.match(source, /massage\.generated\.json/);
-  assert.match(source, /<SvgXml xml=\{artwork\.vectors\}/);
+  assert.match(source, /<SvgXml[\s\S]*xml=\{artwork\.vectors\}/);
   assert.match(source, /<SvgImage/);
-  assert.match(source, /preserveAspectRatio="xMidYMid slice"/);
+  assert.match(source, /width="100%"[\s\S]*height="100%"/);
+  assert.match(source, /preserveAspectRatio="xMidYMid meet"/);
+  assert.match(source, /width:\s*screenWidth/);
+  assert.match(source, /height:\s*screenWidth \* \(ARTWORK_HEIGHT \/ ARTWORK_WIDTH\)/);
+  assert.match(source, /artworkContainer:\s*\{[\s\S]*alignSelf:\s*"center"/);
   assert.doesNotMatch(source, /splash-dotless\.jpg/);
   assert.doesNotMatch(source, /useWindowDimensions/);
   assert.doesNotMatch(source, /artworkSize/);
-  assert.match(source, /artwork:\s*\{[\s\S]*width:\s*'100%'[\s\S]*height:\s*'100%'/);
 });
 
 test('keeps the adaptive icon mark centered inside a 66 percent safe area', () => {
