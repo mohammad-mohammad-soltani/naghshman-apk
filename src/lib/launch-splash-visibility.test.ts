@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { isLaunchSplashVisible, isNativeSplashReady } from './launch-splash-visibility.ts';
+import { isLaunchSplashVisible } from './launch-splash-visibility.ts';
 import { INITIAL_WEB_SHELL_STATE, reduceWebShellState } from './web-shell-state.ts';
 
 test('keeps the launch splash visible until the first document is ready', () => {
@@ -19,13 +19,4 @@ test('never reopens the launch splash on later navigation or load failure', () =
 test('does not fade away until the native-to-custom splash handoff resolves', () => {
   assert.equal(isLaunchSplashVisible(true, false), true);
   assert.equal(isLaunchSplashVisible(true, true), false);
-});
-
-test('hands off the OS splash after layout even when image loading never reports completion', () => {
-  assert.equal(isNativeSplashReady(false, false), false);
-  assert.equal(isNativeSplashReady(true, false), false);
-  assert.equal(isNativeSplashReady(false, true), false);
-  assert.equal(isNativeSplashReady(true, true), true);
-  assert.equal(isNativeSplashReady(false, false, true), false);
-  assert.equal(isNativeSplashReady(true, false, true), true);
 });

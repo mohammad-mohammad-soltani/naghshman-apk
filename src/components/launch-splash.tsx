@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   AccessibilityInfo,
   Animated,
@@ -7,7 +7,6 @@ import {
   View,
 } from 'react-native';
 
-import { isNativeSplashReady } from '@/lib/launch-splash-visibility';
 import {
   RIGHT_TO_LEFT_DOT_ORDER,
   STATIC_REDUCED_MOTION_OPACITIES,
@@ -16,7 +15,6 @@ import {
 const DOT_IDLE_OPACITY = 0.4;
 const FADE_DURATION_MS = 260;
 const ARTWORK_BACKGROUND = '#c03636';
-const IMAGE_WAIT_MS = 1500;
 
 type LaunchSplashProps = {
   visible: boolean;
@@ -35,22 +33,6 @@ export function LaunchSplash({
     new Animated.Value(DOT_IDLE_OPACITY),
   ]);
   const [size, setSize] = useState({ width: 0, height: 0 });
-  const [artworkLaidOut, setArtworkLaidOut] = useState(false);
-  const [artworkLoaded, setArtworkLoaded] = useState(false);
-  const [imageWaitExpired, setImageWaitExpired] = useState(false);
-  const handleArtworkLoaded = useCallback(() => setArtworkLoaded(true), []);
-
-  useEffect(() => {
-    if (!visible || !artworkLaidOut || artworkLoaded) return;
-    const timer = setTimeout(() => setImageWaitExpired(true), IMAGE_WAIT_MS);
-    return () => clearTimeout(timer);
-  }, [visible, artworkLaidOut, artworkLoaded]);
-
-  useEffect(() => {
-    if (!isNativeSplashReady(artworkLaidOut, artworkLoaded, imageWaitExpired)) return;
-    onReady();
-  }, [artworkLaidOut, artworkLoaded, imageWaitExpired, onReady]);
-
   useEffect(() => {
     if (!visible) return;
 
@@ -121,7 +103,9 @@ export function LaunchSplash({
       pointerEvents={visible ? 'auto' : 'none'}
       onLayout={({ nativeEvent: { layout } }) => {
         setSize({ width: layout.width, height: layout.height });
-        setArtworkLaidOut(true);
+        // The local poster and dots are mounted. Release the OS window now;
+        // neither image events nor the website should keep a second splash up.
+        onReady();
       }}
       style={styles.overlay}
     >
@@ -129,7 +113,6 @@ export function LaunchSplash({
         source={require('../../assets/images/splash-dotless.jpg')}
         resizeMode="cover"
         style={styles.artwork}
-        onLoad={handleArtworkLoaded}
       />
       <View
         style={[
