@@ -362,8 +362,7 @@ export function NativeWebShell() {
   const [webViewGeneration, setWebViewGeneration] = useState(0);
   const [splashOverlayMounted, setSplashOverlayMounted] = useState(true);
   const [nativeSplashReleased, setNativeSplashReleased] = useState(false);
-  const [safeAreaBackground, setSafeAreaBackground] =
-    useState("#ffffff");
+  const [safeAreaBackground, setSafeAreaBackground] = useState("#ffffff");
   const [notice, setNotice] = useState<string | null>(null);
   const [storedRefreshToken, setStoredRefreshToken] = useState<
     string | null | undefined
@@ -1006,7 +1005,9 @@ export function NativeWebShell() {
     ) : null;
 
   return (
-    <View style={[styles.container, { backgroundColor: systemChromeBackground }]}>
+    <View
+      style={[styles.container, { backgroundColor: systemChromeBackground }]}
+    >
       <StatusBar
         hidden={false}
         backgroundColor={systemChromeBackground}
