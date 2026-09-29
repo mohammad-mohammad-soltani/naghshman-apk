@@ -195,6 +195,7 @@ function nativeBootstrap(
       };
       if (document.documentElement) observeBackground();
       else document.addEventListener('DOMContentLoaded', observeBackground, { once: true });
+      window.addEventListener('meydan-theme-change', scheduleBackgroundReport);
     }
 
     if (!window.__naghshmanAuthGuard) {
@@ -303,7 +304,7 @@ export function NativeWebShell() {
   const [splashOverlayMounted, setSplashOverlayMounted] = useState(true);
   const [nativeSplashReleased, setNativeSplashReleased] = useState(false);
   const [safeAreaBackground, setSafeAreaBackground] =
-    useState(LAUNCH_BACKGROUND);
+    useState("#ffffff");
   const [notice, setNotice] = useState<string | null>(null);
   const [storedRefreshToken, setStoredRefreshToken] = useState<
     string | null | undefined
@@ -943,7 +944,7 @@ export function NativeWebShell() {
       {Platform.OS === "android" && (
         <NavigationBar
           hidden={splashOverlayMounted}
-          style={lightWebTheme ? "light" : "dark"}
+          style={lightWebTheme ? "dark" : "light"}
         />
       )}
       <SafeAreaView

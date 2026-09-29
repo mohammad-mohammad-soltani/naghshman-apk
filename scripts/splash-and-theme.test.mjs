@@ -30,7 +30,15 @@ test('light web theme drives white system bars and releases the launch overlay',
   const source = readFileSync(new URL('src/components/native-web-shell.tsx', root), 'utf8');
   assert.match(source, /action\.theme === "light" \? "#ffffff" : action\.color/);
   assert.match(source, /const lightWebTheme =[\s\S]*safeAreaBackground === "#ffffff"/);
-  assert.match(source, /style=\{lightWebTheme \? "light" : "dark"\}/);
+  assert.match(source, /style=\{lightWebTheme \? "dark" : "light"\}/);
   assert.match(source, /visible=\{launchSplashVisible\}/);
   assert.doesNotMatch(source, /visible=\{true\}\s*\/\/ launchSplashVisible/);
+});
+
+
+test('light theme starts white and theme changes explicitly resync native system bars', () => {
+  const source = readFileSync(new URL('src/components/native-web-shell.tsx', root), 'utf8');
+  assert.match(source, /useState\("#ffffff"\)/);
+  assert.match(source, /window\.addEventListener\('meydan-theme-change', scheduleBackgroundReport\)/);
+  assert.match(source, /style=\{lightWebTheme \? "dark" : "light"\}/);
 });
