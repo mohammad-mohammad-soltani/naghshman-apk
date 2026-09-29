@@ -43,3 +43,13 @@ test('light mode can never report an interpolated or stale gray system-bar color
   const lightLocks = source.match(/theme === 'light'[\s\S]{0,120}\? '#ffffff'/g) ?? [];
   assert.ok(lightLocks.length >= 2, 'both continuous and one-shot reporters must hard-lock light to white');
 });
+
+
+test('native shell enables hardware rendering and strips the expensive blur animation only in-app', () => {
+  const source = readFileSync(new URL('src/components/native-web-shell.tsx', root), 'utf8');
+  assert.match(source, /androidLayerType=\{Platform\.OS === "android" \? "hardware" : undefined\}/);
+  assert.match(source, /naghshman-native-performance/);
+  assert.match(source, /read-more-reveal-open/);
+  assert.match(source, /filter: none !important/);
+  assert.match(source, /will-change: transform, opacity/);
+});

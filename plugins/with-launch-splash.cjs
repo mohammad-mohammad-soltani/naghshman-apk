@@ -1,4 +1,4 @@
-const { withAndroidStyles } = require('expo/config-plugins');
+const { withAndroidManifest, withAndroidStyles } = require('expo/config-plugins');
 
 // Android still creates its mandatory launch window. Do not show a separate
 // centered logo before the full-screen React loading artwork.
@@ -21,8 +21,23 @@ function configureLaunchTheme(resources) {
   return resources;
 }
 
-module.exports = (config) => withAndroidStyles(config, (mod) => {
-  mod.modResults = configureLaunchTheme(mod.modResults);
-  return mod;
-});
+function configureAndroidManifest(manifest) {
+  const application = manifest.manifest.application?.[0];
+  if (!application) throw new Error('Android application manifest is missing');
+  application.$ ??= {};
+  application.$['android:hardwareAccelerated'] = 'true';
+  return manifest;
+}
+
+module.exports = (config) => {
+  config = withAndroidStyles(config, (mod) => {
+    mod.modResults = configureLaunchTheme(mod.modResults);
+    return mod;
+  });
+  return withAndroidManifest(config, (mod) => {
+    mod.modResults = configureAndroidManifest(mod.modResults);
+    return mod;
+  });
+};
 module.exports.configureLaunchTheme = configureLaunchTheme;
+module.exports.configureAndroidManifest = configureAndroidManifest;

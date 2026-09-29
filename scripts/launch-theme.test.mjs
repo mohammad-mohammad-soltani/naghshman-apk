@@ -17,3 +17,16 @@ test('removes the separate native logo and keeps a branded status bar during lau
   assert.equal(values['android:windowLightStatusBar'], 'false');
   assert.equal(values.postSplashScreenTheme, '@style/AppTheme');
 });
+
+
+test('keeps Android hardware acceleration enabled for WebView rendering', () => {
+  const result = plugin.configureAndroidManifest({
+    manifest: {
+      application: [{ $: {} }],
+    },
+  });
+  assert.equal(
+    result.manifest.application[0].$['android:hardwareAccelerated'],
+    'true',
+  );
+});

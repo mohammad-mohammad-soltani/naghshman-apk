@@ -154,6 +154,44 @@ function nativeBootstrap(
     window.dispatchEvent(new Event('naghshman:native-ready'));
     }
 
+    if (!window.__naghshmanNativePerformanceStyle) {
+      window.__naghshmanNativePerformanceStyle = true;
+      var installNativePerformanceStyle = function () {
+        var root = document.documentElement;
+        if (!root) return;
+
+        root.dataset.naghshmanNativeApp = 'true';
+
+        var existing = document.getElementById('naghshman-native-performance');
+        if (existing) return;
+
+        var style = document.createElement('style');
+        style.id = 'naghshman-native-performance';
+        style.textContent = [
+          'html[data-naghshman-native-app="true"] .route-transition-stage,',
+          'html[data-naghshman-native-app="true"] .ui-enter,',
+          'html[data-naghshman-native-app="true"] .ui-exit,',
+          'html[data-naghshman-native-app="true"] .ui-view-enter,',
+          'html[data-naghshman-native-app="true"] .ui-view-leave,',
+          'html[data-naghshman-native-app="true"] .ui-opening,',
+          'html[data-naghshman-native-app="true"] [role="dialog"] > :first-child,',
+          'html[data-naghshman-native-app="true"] [role="menu"],',
+          'html[data-naghshman-native-app="true"] [role="listbox"] {',
+          '  will-change: transform, opacity;',
+          '  backface-visibility: hidden;',
+          '}',
+          'html[data-naghshman-native-app="true"] .read-more-reveal-open {',
+          '  filter: none !important;',
+          '  will-change: transform, opacity !important;',
+          '}'
+        ].join('');
+        (document.head || root).appendChild(style);
+      };
+
+      if (document.documentElement) installNativePerformanceStyle();
+      else document.addEventListener('DOMContentLoaded', installNativePerformanceStyle, { once: true });
+    }
+
     if (!window.__naghshmanBackgroundReporter) {
       window.__naghshmanBackgroundReporter = true;
       var lastBackground;
@@ -930,6 +968,7 @@ export function NativeWebShell() {
         thirdPartyCookiesEnabled
         cacheEnabled
         pullToRefreshEnabled={false}
+        androidLayerType={Platform.OS === "android" ? "hardware" : undefined}
         automaticallyAdjustContentInsets={false}
         contentInsetAdjustmentBehavior="never"
         renderLoading={() => <View style={styles.webViewErrorFallback} />}
