@@ -52,7 +52,7 @@ test('replaces the WebView diagnostic page with a retryable branded overlay', ()
   const shell = readFileSync(new URL('src/components/native-web-shell.tsx', root), 'utf8');
   const splash = readFileSync(new URL('src/components/launch-splash.tsx', root), 'utf8');
 
-  assert.match(shell, /renderError=\{\(\) => <View style=\{styles\.webViewErrorFallback\} \/>\}/);
+  assert.match(shell, /renderError=\{\(\) => recovery\}/);
   assert.match(shell, /onError=\{handleWebViewError\}/);
   assert.match(shell, /completedDocumentUrl\.current !== event\.nativeEvent\.url/);
   assert.match(shell, /onRenderProcessGone/);
