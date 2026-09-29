@@ -42,3 +42,11 @@ test('light theme starts white and theme changes explicitly resync native system
   assert.match(source, /window\.addEventListener\('meydan-theme-change', scheduleBackgroundReport\)/);
   assert.match(source, /style=\{lightWebTheme \? "dark" : "light"\}/);
 });
+
+
+test('splash keeps the system chrome on the brand red independently of light web theme', () => {
+  const source = readFileSync(new URL('src/components/native-web-shell.tsx', root), 'utf8');
+  assert.match(source, /const systemChromeBackground = splashOverlayMounted[\s\S]*\? LAUNCH_BACKGROUND[\s\S]*: safeAreaBackground/);
+  assert.match(source, /backgroundColor=\{systemChromeBackground\}/);
+  assert.match(source, /styles\.safeArea, \{ backgroundColor: systemChromeBackground \}/);
+});

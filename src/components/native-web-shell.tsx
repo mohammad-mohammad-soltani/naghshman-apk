@@ -864,7 +864,7 @@ export function NativeWebShell() {
     isLaunchSplashVisible(shellState.initialReady, nativeSplashReleased) &&
     !shellState.documentFailed &&
     !retrying;
-  const displayedStatusBarBackground = splashOverlayMounted
+  const systemChromeBackground = splashOverlayMounted
     ? LAUNCH_BACKGROUND
     : safeAreaBackground;
   const lightWebTheme =
@@ -931,10 +931,10 @@ export function NativeWebShell() {
     ) : null;
 
   return (
-    <View style={[styles.container, { backgroundColor: safeAreaBackground }]}>
+    <View style={[styles.container, { backgroundColor: systemChromeBackground }]}>
       <StatusBar
         hidden={false}
-        backgroundColor={displayedStatusBarBackground}
+        backgroundColor={systemChromeBackground}
         barStyle={
           splashOverlayMounted
             ? "light-content"
@@ -949,7 +949,7 @@ export function NativeWebShell() {
       )}
       <SafeAreaView
         edges={["top", "bottom"]}
-        style={[styles.safeArea, { backgroundColor: safeAreaBackground }]}
+        style={[styles.safeArea, { backgroundColor: systemChromeBackground }]}
       >
         <View style={styles.webFrame}>{webView}</View>
       </SafeAreaView>
