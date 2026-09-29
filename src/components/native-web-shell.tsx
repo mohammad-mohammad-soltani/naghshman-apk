@@ -35,10 +35,6 @@ import {
   supportsNativePushNotifications,
 } from "@/lib/native-push";
 import {
-  isCurrentDocumentReady,
-  webDocumentReadyScript,
-} from "@/lib/web-document-ready";
-import {
   INITIAL_WEB_SHELL_STATE,
   reduceWebShellState,
   shouldRetryFailedLoad,
@@ -292,7 +288,6 @@ export function NativeWebShell() {
   const webViewDocumentReady = useRef(false);
   const initialAttemptHadError = useRef(false);
   const completedDocumentUrl = useRef<string | null>(null);
-  const loadAttempt = useRef(0);
   const mainDocumentUrl = useRef(APP_URL);
   const retryDelayMs = useRef(4000);
   const webViewProcessDead = useRef(false);
@@ -519,7 +514,6 @@ export function NativeWebShell() {
       return;
 
     dispatchShellEvent({ type: "retry-started" });
-    loadAttempt.current += 1;
     initialAttemptHadError.current = false;
     completedDocumentUrl.current = null;
     setLoading(true);
@@ -642,24 +636,6 @@ export function NativeWebShell() {
 
   const handleMessage = useCallback(
     async (event: WebViewMessageEvent) => {
-      try {
-        const message: unknown = JSON.parse(event.nativeEvent.data);
-        if (
-          isCurrentDocumentReady(
-            message,
-            loadAttempt.current,
-            completedDocumentUrl.current,
-            initialAttemptHadError.current,
-          )
-        ) {
-          setLoading(false);
-          dispatchShellEvent({ type: "load-succeeded" });
-          retryDelayMs.current = 4000;
-          return;
-        }
-      } catch {
-        return;
-      }
       const action = parseNativeBridgeMessage(event.nativeEvent.data);
       if (!action) return;
 
@@ -706,7 +682,7 @@ export function NativeWebShell() {
           break;
       }
     },
-    [dispatchShellEvent, saveMedia, setNativeAuthentication, showNotice],
+    [saveMedia, setNativeAuthentication, showNotice],
   );
 
   const handleLoadEnd = useCallback(
@@ -733,10 +709,6 @@ export function NativeWebShell() {
         );
         return;
       }
-
-      webViewRef.current?.injectJavaScript(
-        webDocumentReadyScript(loadAttempt.current),
-      );
 
       if (
         !nativePlatform ||
@@ -766,7 +738,6 @@ export function NativeWebShell() {
     (event: { nativeEvent: { url: string } }) => {
       if (!isInitialWebDocument(event.nativeEvent.url)) return;
       mainDocumentUrl.current = event.nativeEvent.url;
-      loadAttempt.current += 1;
       setLoading(true);
       webViewDocumentReady.current = false;
       completedDocumentUrl.current = null;
@@ -778,16 +749,19 @@ export function NativeWebShell() {
   const handleLoad = useCallback((event: { nativeEvent: { url: string } }) => {
     if (
       !initialAttemptHadError.current &&
-      event.nativeEvent.url === mainDocumentUrl.current &&
       isInitialWebDocument(event.nativeEvent.url)
     ) {
       completedDocumentUrl.current = event.nativeEvent.url;
-      // Only the full artwork's layout + image load can release the OS splash.
+      // Native onLoad is the success signal. Waiting for fonts, animation frames
+      // or a message from the covered page can leave a loaded site hidden forever.
+      mainDocumentUrl.current = event.nativeEvent.url;
+      setLoading(false);
+      dispatchShellEvent({ type: "load-succeeded" });
+      retryDelayMs.current = 4000;
     }
-  }, []);
+  }, [dispatchShellEvent]);
 
   const handlePageFailure = useCallback(() => {
-    loadAttempt.current += 1;
     initialAttemptHadError.current = true;
     completedDocumentUrl.current = null;
     webViewDocumentReady.current = false;
@@ -896,7 +870,7 @@ export function NativeWebShell() {
         onHttpError={(event) => {
           if (
             event.nativeEvent.statusCode >= 400 &&
-            event.nativeEvent.url === mainDocumentUrl.current
+            isInitialWebDocument(event.nativeEvent.url)
           ) {
             handlePageFailure();
           }
