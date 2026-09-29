@@ -157,12 +157,30 @@ function nativeBootstrap(
     if (!window.__naghshmanBackgroundReporter) {
       window.__naghshmanBackgroundReporter = true;
       var lastBackground;
-      var reportBackground = function () {
+      var readSelectedTheme = function (explicitTheme) {
+        if (explicitTheme === 'light') return 'light';
+        if (explicitTheme === 'dark' || explicitTheme === 'black') return 'dark';
+
+        try {
+          var storedTheme = window.localStorage.getItem('meydan-theme');
+          if (storedTheme === 'light') return 'light';
+          if (storedTheme === 'dark' || storedTheme === 'black') return 'dark';
+        } catch (error) {}
+
+        var root = document.documentElement;
+        return root && (root.classList.contains('dark') || root.classList.contains('black'))
+          ? 'dark'
+          : 'light';
+      };
+      var reportBackground = function (explicitTheme) {
         var root = document.documentElement;
         if (!root) return;
-        var background = window.getComputedStyle(root)
-          .getPropertyValue('--background').trim();
-        var theme = root.classList.contains('dark') || root.classList.contains('black') || window.getComputedStyle(root).colorScheme === 'dark' ? 'dark' : 'light';
+
+        var theme = readSelectedTheme(explicitTheme);
+        var background = theme === 'light'
+          ? '#ffffff'
+          : window.getComputedStyle(root).getPropertyValue('--background').trim();
+
         var backgroundKey = theme + ':' + background;
         if (/^#[0-9a-f]{6}$/i.test(background) && backgroundKey !== lastBackground) {
           lastBackground = backgroundKey;
@@ -177,11 +195,12 @@ function nativeBootstrap(
           }
         }
       };
-      var scheduleBackgroundReport = function () {
+      var scheduleBackgroundReport = function (explicitTheme) {
+        var run = function () { reportBackground(explicitTheme); };
         if (typeof window.requestAnimationFrame === 'function') {
-          window.requestAnimationFrame(reportBackground);
+          window.requestAnimationFrame(run);
         } else {
-          window.setTimeout(reportBackground, 0);
+          window.setTimeout(run, 0);
         }
       };
       var observeBackground = function () {
@@ -195,7 +214,9 @@ function nativeBootstrap(
       };
       if (document.documentElement) observeBackground();
       else document.addEventListener('DOMContentLoaded', observeBackground, { once: true });
-      window.addEventListener('meydan-theme-change', scheduleBackgroundReport);
+      window.addEventListener('meydan-theme-change', function (event) {
+        scheduleBackgroundReport(event && event.detail);
+      });
     }
 
     if (!window.__naghshmanAuthGuard) {
@@ -577,15 +598,30 @@ export function NativeWebShell() {
       (function () {
         var root = document.documentElement;
         if (!root || !window.ReactNativeWebView) return true;
-        var background = window.getComputedStyle(root)
-          .getPropertyValue('--background').trim();
+        var storedTheme = null;
+        try {
+          storedTheme = window.localStorage.getItem('meydan-theme');
+        } catch (error) {}
+
+        var theme = storedTheme === 'light'
+          ? 'light'
+          : storedTheme === 'dark' || storedTheme === 'black'
+            ? 'dark'
+            : root.classList.contains('dark') || root.classList.contains('black')
+              ? 'dark'
+              : 'light';
+
+        var background = theme === 'light'
+          ? '#ffffff'
+          : window.getComputedStyle(root).getPropertyValue('--background').trim();
+
         if (/^#[0-9a-f]{6}$/i.test(background)) {
           window.ReactNativeWebView.postMessage(JSON.stringify({
             source: 'naghshman-web',
             version: 1,
             type: 'set-safe-area-background',
             color: background,
-            theme: root.classList.contains('dark') || root.classList.contains('black') || window.getComputedStyle(root).colorScheme === 'dark' ? 'dark' : 'light'
+            theme: theme
           }));
         }
         return true;

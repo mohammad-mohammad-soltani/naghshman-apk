@@ -4,25 +4,12 @@ import vm from 'node:vm';
 import test from 'node:test';
 
 const root = new URL('../', import.meta.url);
-test('both injected theme reporters treat black and dark as night, and light as day', () => {
+test('native theme reporter uses the stored web theme and hard-locks light to white', () => {
   const source = readFileSync(new URL('src/components/native-web-shell.tsx', root), 'utf8');
-  const expressions = [
-    source.match(/var theme = (.*);/)[1],
-    source.match(/theme: (root\.classList.*)/)[1],
-  ];
-  for (const expression of expressions) {
-    for (const [classes, scheme, expected] of [
-      [['black'], 'dark', 'dark'],
-      [['dark'], 'normal', 'dark'],
-      [[], 'dark', 'dark'],
-      [[], 'light', 'light'],
-    ]) {
-      assert.equal(vm.runInNewContext(expression, {
-        root: { classList: { contains: (name) => classes.includes(name) } },
-        window: { getComputedStyle: () => ({ colorScheme: scheme }) },
-      }), expected);
-    }
-  }
+  assert.match(source, /localStorage\.getItem\('meydan-theme'\)/);
+  assert.match(source, /explicitTheme === 'light'/);
+  assert.match(source, /theme === 'light'[\s\S]*\? '#ffffff'/);
+  assert.match(source, /meydan-theme-change'[\s\S]*event && event\.detail/);
 });
 
 
@@ -39,7 +26,7 @@ test('light web theme drives white system bars and releases the launch overlay',
 test('light theme starts white and theme changes explicitly resync native system bars', () => {
   const source = readFileSync(new URL('src/components/native-web-shell.tsx', root), 'utf8');
   assert.match(source, /useState\("#ffffff"\)/);
-  assert.match(source, /window\.addEventListener\('meydan-theme-change', scheduleBackgroundReport\)/);
+  assert.match(source, /window\.addEventListener\('meydan-theme-change',[\s\S]*event && event\.detail/);
   assert.match(source, /style=\{lightWebTheme \? "dark" : "light"\}/);
 });
 
@@ -49,4 +36,11 @@ test('splash keeps the system chrome on the brand red independently of light web
   assert.match(source, /const systemChromeBackground = splashOverlayMounted[\s\S]*\? LAUNCH_BACKGROUND[\s\S]*: safeAreaBackground/);
   assert.match(source, /backgroundColor=\{systemChromeBackground\}/);
   assert.match(source, /styles\.safeArea, \{ backgroundColor: systemChromeBackground \}/);
+});
+
+
+test('light mode can never report an interpolated or stale gray system-bar color', () => {
+  const source = readFileSync(new URL('src/components/native-web-shell.tsx', root), 'utf8');
+  const lightLocks = source.match(/theme === 'light'[\s\S]{0,120}\? '#ffffff'/g) ?? [];
+  assert.ok(lightLocks.length >= 2, 'both continuous and one-shot reporters must hard-lock light to white');
 });
