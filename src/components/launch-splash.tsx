@@ -1,12 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   AccessibilityInfo,
   Animated,
-  Image,
   StyleSheet,
   View,
 } from 'react-native';
+import Svg, { Image as SvgImage, SvgXml } from 'react-native-svg';
+import artwork from '../../assets/images/massage.generated.json';
 
+import { isNativeSplashReady } from '@/lib/launch-splash-visibility';
 import {
   RIGHT_TO_LEFT_DOT_ORDER,
   STATIC_REDUCED_MOTION_OPACITIES,
@@ -33,6 +35,14 @@ export function LaunchSplash({
     new Animated.Value(DOT_IDLE_OPACITY),
   ]);
   const [size, setSize] = useState({ width: 0, height: 0 });
+  const [artworkLaidOut, setArtworkLaidOut] = useState(false);
+  const [artworkLoaded, setArtworkLoaded] = useState(false);
+  const handleArtworkLoaded = useCallback(() => setArtworkLoaded(true), []);
+
+  useEffect(() => {
+    if (isNativeSplashReady(artworkLaidOut, artworkLoaded)) onReady();
+  }, [artworkLaidOut, artworkLoaded, onReady]);
+
   useEffect(() => {
     if (!visible) return;
 
@@ -103,17 +113,25 @@ export function LaunchSplash({
       pointerEvents={visible ? 'auto' : 'none'}
       onLayout={({ nativeEvent: { layout } }) => {
         setSize({ width: layout.width, height: layout.height });
-        // The local poster and dots are mounted. Release the OS window now;
-        // neither image events nor the website should keep a second splash up.
-        onReady();
+        setArtworkLaidOut(true);
       }}
       style={styles.overlay}
     >
-      <Image
-        source={require('../../assets/images/splash-dotless.jpg')}
-        resizeMode="cover"
+      <Svg
+        width="100%"
+        height="100%"
+        viewBox={artwork.viewBox}
+        preserveAspectRatio="xMidYMid slice"
         style={styles.artwork}
-      />
+      >
+        <SvgXml xml={artwork.vectors} width="100%" height="100%" />
+        <SvgImage
+          {...artwork.image.frame}
+          href={artwork.image.uri}
+          preserveAspectRatio="xMidYMid meet"
+          onLoad={handleArtworkLoaded}
+        />
+      </Svg>
       <View
         style={[
           styles.dots,

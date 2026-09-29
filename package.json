@@ -39,6 +39,7 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
+    "generate:splash-artwork": "node scripts/generate-splash-artwork.mjs",
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
     "test": "node --test src/lib/*.test.ts scripts/*.test.mjs",

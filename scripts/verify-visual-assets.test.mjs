@@ -6,12 +6,14 @@ import { PNG } from 'pngjs';
 
 const root = new URL('../', import.meta.url);
 
-test('covers the screen with the portrait artwork without stretching its motif', () => {
+test('covers the screen with the vector splash artwork without stretching its motif', () => {
   const source = readFileSync(new URL('src/components/launch-splash.tsx', root), 'utf8');
 
-  assert.match(source, /source=\{require\('\.\.\/\.\.\/assets\/images\/splash-dotless\.jpg'\)\}/);
-  assert.match(source, /resizeMode="cover"/);
-  assert.doesNotMatch(source, /massage\.generated\.json|SvgXml|SvgImage/);
+  assert.match(source, /massage\.generated\.json/);
+  assert.match(source, /<SvgXml xml=\{artwork\.vectors\}/);
+  assert.match(source, /<SvgImage/);
+  assert.match(source, /preserveAspectRatio="xMidYMid slice"/);
+  assert.doesNotMatch(source, /splash-dotless\.jpg/);
   assert.doesNotMatch(source, /useWindowDimensions/);
   assert.doesNotMatch(source, /artworkSize/);
   assert.match(source, /artwork:\s*\{[\s\S]*width:\s*'100%'[\s\S]*height:\s*'100%'/);
