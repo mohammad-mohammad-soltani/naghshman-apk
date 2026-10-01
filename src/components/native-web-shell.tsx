@@ -12,6 +12,7 @@ import {
   Share,
   StatusBar,
   StyleSheet,
+  Text,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -38,7 +39,9 @@ import {
 import {
   INITIAL_WEB_SHELL_STATE,
   reduceWebShellState,
+  shouldAnnounceSoftFailure,
   shouldRetryFailedLoad,
+  softRetryDelay,
   type WebShellEvent,
 } from "@/lib/web-shell-state";
 import { shouldHandleWebViewBack } from "@/lib/webview-back-navigation";
@@ -47,6 +50,8 @@ import * as SplashScreen from "expo-splash-screen";
 const APP_URL = "https://naghshman.ir";
 const REFRESH_TOKEN_KEY = "naghshman.refresh-token";
 const BRAND_BACKGROUND = "#dc2626";
+const OFFLINE_NOTICE = "اینترنت قطع است؛ دوباره تلاش می‌کنیم.";
+const RETRYING_NOTICE = "ارتباط برقرار نشد؛ دوباره تلاش می‌کنیم.";
 const LAUNCH_BACKGROUND = "#c03636";
 const MIN_CUSTOM_SPLASH_MS = 2000;
 
@@ -420,6 +425,11 @@ export function NativeWebShell() {
   const completedDocumentUrl = useRef<string | null>(null);
   const mainDocumentUrl = useRef(APP_URL);
   const retryDelayMs = useRef(4000);
+  // The URL of a later navigation that failed while a working page stayed up.
+  const softRetryUrl = useRef<string | null>(null);
+  // Unlike completedDocumentUrl, this survives the next navigation attempt.
+  const lastGoodDocumentUrl = useRef<string | null>(null);
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const webViewProcessDead = useRef(false);
   const shellStateRef = useRef(INITIAL_WEB_SHELL_STATE);
   const network = useNetworkState();
@@ -648,6 +658,23 @@ export function NativeWebShell() {
     return () => subscription.remove();
   }, []);
 
+  // Recover a failed later navigation behind the live page: no error screen,
+  // no reload of a healthy document the user is reading.
+  const retrySoftly = useCallback(() => {
+    const url = softRetryUrl.current;
+    initialAttemptHadError.current = false;
+
+    // Re-request the navigation the user asked for, rather than reloading
+    // whichever document WebView happens to be holding.
+    if (url && url !== lastGoodDocumentUrl.current) {
+      webViewRef.current?.injectJavaScript(
+        `window.location.replace(${JSON.stringify(url)}); true;`,
+      );
+      return;
+    }
+    webViewRef.current?.reload();
+  }, []);
+
   const retryFailedPage = useCallback(() => {
     // A manual retry is also allowed if the OS has detected an offline first
     // launch before WebView has emitted its failure event.
@@ -661,6 +688,7 @@ export function NativeWebShell() {
     dispatchShellEvent({ type: "retry-started" });
     initialAttemptHadError.current = false;
     completedDocumentUrl.current = null;
+    softRetryUrl.current = null;
     setLoading(true);
 
     if (webViewProcessDead.current) {
@@ -678,12 +706,21 @@ export function NativeWebShell() {
     const retry = shouldRetryFailedLoad(shellStateRef.current, online);
 
     dispatchShellEvent({ type: "network-changed", online });
-    if (retry && !redirectFailureRef.current) retryFailedPage();
+    if (!retry || redirectFailureRef.current) return;
+    if (shellStateRef.current.documentFailed) {
+      retryFailedPage();
+      return;
+    }
+    // A silent failure streak restarts from the short delay once the network
+    // is back, instead of waiting out the backoff accumulated while offline.
+    dispatchShellEvent({ type: "retry-started" });
+    retrySoftly();
   }, [
     dispatchShellEvent,
     network.isConnected,
     network.isInternetReachable,
     retryFailedPage,
+    retrySoftly,
   ]);
 
   // A server can recover without the OS reporting any connectivity change.
@@ -705,11 +742,34 @@ export function NativeWebShell() {
 
   const showNotice = useCallback((message: string) => {
     setNotice(message);
-    setTimeout(
-      () => setNotice((current) => (current === message ? null : current)),
-      3200,
-    );
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    noticeTimer.current = setTimeout(() => {
+      noticeTimer.current = null;
+      setNotice(null);
+    }, 3200);
   }, []);
+
+  useEffect(
+    () => () => {
+      if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (shellState.softFailures === 0 || !shellState.online || redirectFailure)
+      return;
+    const timer = setTimeout(
+      retrySoftly,
+      softRetryDelay(shellState.softFailures),
+    );
+    return () => clearTimeout(timer);
+  }, [
+    redirectFailure,
+    retrySoftly,
+    shellState.online,
+    shellState.softFailures,
+  ]);
 
   const syncSafeAreaBackground = useCallback(() => {
     webViewRef.current?.injectJavaScript(`
@@ -922,6 +982,8 @@ export function NativeWebShell() {
         // Native onLoad is the success signal. Waiting for fonts, animation frames
         // or a message from the covered page can leave a loaded site hidden forever.
         mainDocumentUrl.current = event.nativeEvent.url;
+        lastGoodDocumentUrl.current = event.nativeEvent.url;
+        softRetryUrl.current = null;
         setLoading(false);
         setRetrying(false);
         setRedirectFailure(false);
@@ -933,14 +995,37 @@ export function NativeWebShell() {
     [dispatchShellEvent],
   );
 
-  const handlePageFailure = useCallback(() => {
-    setRetrying(false);
-    initialAttemptHadError.current = true;
-    completedDocumentUrl.current = null;
-    webViewDocumentReady.current = false;
-    setLoading(false);
-    dispatchShellEvent({ type: "load-failed" });
-  }, [dispatchShellEvent]);
+  const handlePageFailure = useCallback(
+    (options: { url?: string; blocking?: boolean } = {}) => {
+      const blocking =
+        options.blocking === true || !shellStateRef.current.initialReady;
+      const previous = shellStateRef.current;
+
+      setRetrying(false);
+      initialAttemptHadError.current = true;
+      webViewDocumentReady.current = false;
+      setLoading(false);
+      if (blocking) {
+        // Nothing usable is left on screen, so no document may be claimed.
+        completedDocumentUrl.current = null;
+        lastGoodDocumentUrl.current = null;
+        softRetryUrl.current = null;
+      } else {
+        softRetryUrl.current =
+          options.url && isInitialWebDocument(options.url)
+            ? options.url
+            : mainDocumentUrl.current;
+      }
+
+      dispatchShellEvent({ type: "load-failed", blocking });
+      if (shouldAnnounceSoftFailure(previous, shellStateRef.current)) {
+        showNotice(
+          shellStateRef.current.online ? RETRYING_NOTICE : OFFLINE_NOTICE,
+        );
+      }
+    },
+    [dispatchShellEvent, showNotice],
+  );
 
   // A stalled load or renderer must recover without ever revealing partial content.
   useEffect(() => {
@@ -985,8 +1070,13 @@ export function NativeWebShell() {
         // /auth?returnTo=/auth chain retained by WebView.reload().
         webViewProcessDead.current = true;
       }
-      handlePageFailure();
-      // Do not preventDefault: WebView must replace its native error document.
+      // A redirect loop needs the full recovery screen; any other failure of a
+      // later navigation must leave the working page untouched, which means
+      // suppressing WebView's own error view state instead of rendering over it.
+      const blocking = redirect || !shellStateRef.current.initialReady;
+      if (!blocking) event.preventDefault();
+      handlePageFailure({ url, blocking });
+      // Without preventDefault, WebView replaces its native error document.
     },
     [handlePageFailure],
   );
@@ -1074,16 +1164,17 @@ export function NativeWebShell() {
             event.nativeEvent.statusCode >= 400 &&
             isInitialWebDocument(event.nativeEvent.url)
           ) {
-            handlePageFailure();
+            handlePageFailure({ url: event.nativeEvent.url });
           }
         }}
         onRenderProcessGone={() => {
+          // The renderer is gone, so there is no page left to keep showing.
           webViewProcessDead.current = true;
-          handlePageFailure();
+          handlePageFailure({ blocking: true });
         }}
         onContentProcessDidTerminate={() => {
           webViewProcessDead.current = true;
-          handlePageFailure();
+          handlePageFailure({ blocking: true });
         }}
         style={styles.webView}
       />
@@ -1119,6 +1210,15 @@ export function NativeWebShell() {
           {recovery}
         </SafeAreaView>
       )}
+      {notice && (
+        <View
+          pointerEvents="none"
+          accessibilityLiveRegion="polite"
+          style={styles.notice}
+        >
+          <Text style={styles.noticeText}>{notice}</Text>
+        </View>
+      )}
       <LaunchSplash
         visible={launchSplashVisible}
         onReady={hideNativeSplash}
@@ -1145,6 +1245,7 @@ const styles = StyleSheet.create({
   webViewErrorFallback: { flex: 1, backgroundColor: LAUNCH_BACKGROUND },
   notice: {
     position: "absolute",
+    zIndex: 3000,
     bottom: 34,
     left: 20,
     right: 20,
