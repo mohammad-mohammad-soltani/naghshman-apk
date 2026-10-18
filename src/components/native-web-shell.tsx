@@ -30,6 +30,7 @@ import { ForceUpdateScreen } from "@/components/force-update-screen";
 import { LaunchSplash } from "@/components/launch-splash";
 import { MediaPickerHost } from "@/components/media-picker-sheet";
 import { useMediaPermissions } from "@/components/permission-sheet";
+import { useKeyboardInset } from "@/components/use-keyboard-inset";
 import { WebLoadError } from "@/components/web-load-error";
 import {
   parseAppReleaseStatus,
@@ -241,6 +242,19 @@ function nativeBootstrap(
         });
       };
     }
+    // The app shell is exactly one viewport tall and scrolls inside <main>,
+    // so the document itself must never stay scrolled. Chromium can pan it to
+    // reveal a focused field while the keyboard opens, before the shell has
+    // shrunk the WebView; undo that so top bars stay put.
+    var pinAppShell = function () {
+      var scroller = document.scrollingElement;
+      if (!scroller || !scroller.scrollTop || !document.getElementById('mainAppShell')) return;
+      // html has scroll-behavior: smooth; this correction must not animate.
+      window.scrollTo({ top: 0, left: scroller.scrollLeft, behavior: 'instant' });
+    };
+    window.addEventListener('resize', pinAppShell);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', pinAppShell);
+    window.addEventListener('scroll', pinAppShell, { passive: true });
     window.dispatchEvent(new Event('naghshman:native-ready'));
     }
 
@@ -482,6 +496,8 @@ export function NativeWebShell() {
     Constants.executionEnvironment,
   );
   const webViewRef = useRef<WebView>(null);
+  const webFrameRef = useRef<View>(null);
+  const keyboardInset = useKeyboardInset(webFrameRef);
   const canGoBackRef = useRef(false);
   const hasHiddenNativeSplashRef = useRef(false);
   const restoreAttemptedToken = useRef<string | null>(null);
@@ -1517,7 +1533,18 @@ export function NativeWebShell() {
         edges={["top", "bottom"]}
         style={[styles.safeArea, { backgroundColor: systemChromeBackground }]}
       >
-        <View style={styles.webFrame}>{webView}</View>
+        <View
+          ref={webFrameRef}
+          style={[
+            styles.webFrame,
+            keyboardInset > 0 && {
+              paddingBottom: keyboardInset,
+              backgroundColor: systemChromeBackground,
+            },
+          ]}
+        >
+          {webView}
+        </View>
       </SafeAreaView>
       {(shellState.documentFailed || retrying) && (
         <SafeAreaView style={styles.recovery} edges={["top", "bottom"]}>
