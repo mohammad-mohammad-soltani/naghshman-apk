@@ -1,12 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   Easing,
   LayoutAnimation,
+  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from "react-native";
 import Svg, { Circle, Path } from "react-native-svg";
@@ -46,6 +48,15 @@ export const SURFACE = {
     scrim: "rgba(0,0,0,0.42)",
   },
 };
+
+/** Sideways travel before a drag becomes a swipe; less stays a tap or a scroll. */
+const SWIPE_SLOP = 10;
+/** How far ahead (ms) a release projects the finger's momentum. */
+const SWIPE_PROJECTION_MS = 180;
+/** A release this fast (px/ms) toward the edge always throws the card away. */
+const SWIPE_FLING = 0.75;
+/** …and one projected past this share of the screen does too. */
+const SWIPE_DISTANCE = 0.42;
 
 /** A settled tray folds away on its own unless the viewer has it open. */
 const AUTO_HIDE_MS = 4500;
@@ -381,7 +392,7 @@ function Row({
  * its own progress, cancel, retry and open.
  */
 export function DownloadTray({
-  items,
+  items: allItems,
   theme,
   bottom,
   onCancel,
@@ -405,6 +416,16 @@ export function DownloadTray({
   onHeightChange: (height: number) => void;
 }) {
   const colors = SURFACE[theme];
+  const { width: screenWidth } = useWindowDimensions();
+  // Swiped away: these downloads keep running out of sight, and the card
+  // comes back for the next new one.
+  const [dismissed, setDismissed] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const items = useMemo(
+    () => allItems.filter((item) => !dismissed.has(item.id)),
+    [allItems, dismissed],
+  );
   const [expanded, setExpanded] = useState(false);
   // The last non-empty list stays on screen while the card slides away.
   const [shown, setShown] = useState(items);
@@ -412,6 +433,7 @@ export function DownloadTray({
   const [scrim] = useState(() => new Animated.Value(0));
   const [chevron] = useState(() => new Animated.Value(0));
   const [lift] = useState(() => new Animated.Value(bottom));
+  const [swipe] = useState(() => new Animated.Value(0));
   const visible = items.length > 0 && !hidden;
   const summary = summarizeDownloads(items);
 
@@ -423,6 +445,11 @@ export function DownloadTray({
     if (!visible) onHeightChange(0);
     else if (heightRef.current) onHeightChange(heightRef.current);
   }, [onHeightChange, visible]);
+
+  // Coming back after a swipe: in from where it rests, not from the edge.
+  useEffect(() => {
+    if (visible) swipe.setValue(0);
+  }, [swipe, visible]);
 
   useEffect(() => {
     Animated.spring(presence, {
@@ -461,6 +488,82 @@ export function DownloadTray({
     }).start();
   }, [bottom, lift]);
 
+  // A swipe only counts up; the downloads on screen at that moment are then
+  // set aside here, and the finished ones cleared.
+  const [dismissals, setDismissals] = useState(0);
+  const [handledDismissals, setHandledDismissals] = useState(0);
+  if (dismissals !== handledDismissals) {
+    setHandledDismissals(dismissals);
+    setDismissed(new Set(allItems.map((item) => item.id)));
+  }
+  useEffect(() => {
+    if (handledDismissals) onClearSettled();
+  }, [handledDismissals, onClearSettled]);
+
+  /**
+   * Telegram-style swipe to dismiss. The card tracks the finger 1:1 and fades
+   * with distance; on release the finger's momentum is projected ahead, so a
+   * short flick throws it off just like a long drag, while a hesitant or
+   * reversed drag springs back. Either way the motion continues at the
+   * finger's own speed.
+   *
+   * Built once per screen width: rebuilding it whenever progress arrives
+   * would reset a drag in flight.
+   */
+  const pan = useMemo(() => {
+    const settle = (vx: number) =>
+      Animated.spring(swipe, {
+        toValue: 0,
+        velocity: vx,
+        stiffness: 320,
+        damping: 26,
+        mass: 0.9,
+        useNativeDriver: true,
+      }).start();
+    return PanResponder.create({
+      onMoveShouldSetPanResponderCapture: (_, gesture) =>
+        Math.abs(gesture.dx) > SWIPE_SLOP &&
+        Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.4,
+      onPanResponderGrant: () => {
+        // Caught mid-flight: carry on from where it is.
+        swipe.stopAnimation();
+        swipe.extractOffset();
+      },
+      onPanResponderMove: (_, gesture) => swipe.setValue(gesture.dx),
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderRelease: (_, gesture) => {
+        swipe.flattenOffset();
+        swipe.stopAnimation((x) => {
+          const projected = x + gesture.vx * SWIPE_PROJECTION_MS;
+          const flung =
+            Math.abs(gesture.vx) > SWIPE_FLING &&
+            Math.sign(gesture.vx) === Math.sign(x);
+          if (!flung && Math.abs(projected) < screenWidth * SWIPE_DISTANCE) {
+            settle(gesture.vx);
+            return;
+          }
+          const direction = Math.sign(projected || x || gesture.vx) || 1;
+          Animated.spring(swipe, {
+            toValue: direction * (screenWidth + 32),
+            // Never slower than a brisk throw, so a slow drag past the line still leaves.
+            velocity: direction * Math.max(Math.abs(gesture.vx), 1.2),
+            stiffness: 180,
+            damping: 24,
+            overshootClamping: true,
+            restDisplacementThreshold: 4,
+            useNativeDriver: true,
+          }).start(({ finished }) => {
+            if (finished) setDismissals((count) => count + 1);
+          });
+        });
+      },
+      onPanResponderTerminate: (_, gesture) => {
+        swipe.flattenOffset();
+        settle(gesture.vx);
+      },
+    });
+  }, [screenWidth, swipe]);
+
   const settled = items.length > 0 && summary.active === 0;
   useEffect(() => {
     if (!settled || expanded) return;
@@ -495,6 +598,9 @@ export function DownloadTray({
         />
       </Animated.View>
       <Animated.View
+        {...pan.panHandlers}
+        accessibilityActions={[{ name: "escape", label: "کنار گذاشتن" }]}
+        onAccessibilityAction={() => setDismissals((count) => count + 1)}
         onLayout={(event) => {
           heightRef.current = event.nativeEvent.layout.height;
           if (visible) onHeightChange(heightRef.current);
@@ -504,8 +610,16 @@ export function DownloadTray({
           {
             backgroundColor: colors.card,
             borderColor: colors.border,
-            opacity: presence,
+            opacity: Animated.multiply(
+              presence,
+              swipe.interpolate({
+                inputRange: [-screenWidth, 0, screenWidth],
+                outputRange: [0, 1, 0],
+                extrapolate: "clamp",
+              }),
+            ),
             transform: [
+              { translateX: swipe },
               {
                 translateY: Animated.add(
                   Animated.multiply(lift, -1),

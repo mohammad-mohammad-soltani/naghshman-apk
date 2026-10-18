@@ -13,6 +13,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 
+import { optimizeLottie } from "@/lib/lottie-optimize";
 import { SPLASH_BACKGROUND, type SplashTheme } from "@/lib/splash-cache";
 import { readCachedSplash } from "@/lib/splash-store";
 
@@ -72,9 +73,13 @@ export function LaunchSplash({
 }: LaunchSplashProps) {
   const insets = useSafeAreaInsets();
   // Both sources passed `isValidLottie` (the bundled ones are the site's own).
+  // Optimized for lottie-android, which draws every shape group on the UI
+  // thread each frame: the same frames, far fewer draws (see lottie-optimize).
   const source = useMemo(
     () =>
-      (readCachedSplash(theme) ?? BUNDLED_SPLASH[theme]) as unknown as AnimationObject,
+      optimizeLottie(
+        readCachedSplash(theme) ?? BUNDLED_SPLASH[theme],
+      ) as unknown as AnimationObject,
     [theme],
   );
   const reducedMotion = useReducedMotion();
@@ -252,7 +257,11 @@ function Wiggle({
 
     const loops = reducedMotion
       ? [oscillate(breath, 4200)]
-      : [oscillate(sway, 2600), oscillate(float, 3400), oscillate(breath, 4200)];
+      : [
+          oscillate(sway, 2600),
+          oscillate(float, 3400),
+          oscillate(breath, 4200),
+        ];
     loops.forEach((loop) => loop.start());
     return () => loops.forEach((loop) => loop.stop());
   }, [active, breath, float, reducedMotion, sway]);
@@ -287,7 +296,9 @@ function Wiggle({
         ],
       };
 
-  return <Animated.View style={[styles.wiggle, style]}>{children}</Animated.View>;
+  return (
+    <Animated.View style={[styles.wiggle, style]}>{children}</Animated.View>
+  );
 }
 
 function OfflineCard({
@@ -395,8 +406,8 @@ function OfflineCard({
         شما آفلاین هستید
       </Text>
       <Text style={[styles.message, { color: palette.message }]}>
-        اتصال اینترنت را بررسی کنید و دوباره تلاش کنید. به محض برقراری
-        اتصال، خودمان ادامه می‌دهیم.
+        اتصال اینترنت را بررسی کنید و دوباره تلاش کنید. به محض برقراری اتصال،
+        خودمان ادامه می‌دهیم.
       </Text>
       <Pressable
         accessibilityRole="button"
