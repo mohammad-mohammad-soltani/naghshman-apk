@@ -37,7 +37,6 @@ import {
 } from "@/lib/app-release";
 import { readStoredRelease, storeRelease } from "@/lib/app-release-store";
 import { isInitialWebDocument } from "@/lib/initial-web-document";
-import { galleryFilename, isGalleryMedia } from "@/lib/media-save";
 import {
   INITIAL_LAUNCH_GATE,
   isRetryingLaunch,
@@ -51,6 +50,7 @@ import {
   isLaunchSplashVisible,
   SPLASH_ANIMATION_CAP_MS,
 } from "@/lib/launch-splash-visibility";
+import { galleryFilename, isGalleryMedia } from "@/lib/media-save";
 import {
   initialNativeWebUrl,
   shouldAllowNativeGuestNavigation,
@@ -62,14 +62,6 @@ import {
   supportsNativePushNotifications,
 } from "@/lib/native-push";
 import {
-  INITIAL_WEB_SHELL_STATE,
-  reduceWebShellState,
-  shouldAnnounceSoftFailure,
-  shouldRetryFailedLoad,
-  softRetryDelay,
-  type WebShellEvent,
-} from "@/lib/web-shell-state";
-import {
   resolveSplashTheme,
   SPLASH_BACKGROUND,
   SPLASH_THEMES,
@@ -80,6 +72,14 @@ import {
   readSplashMeta,
   saveSplashTheme,
 } from "@/lib/splash-store";
+import {
+  INITIAL_WEB_SHELL_STATE,
+  reduceWebShellState,
+  shouldAnnounceSoftFailure,
+  shouldRetryFailedLoad,
+  softRetryDelay,
+  type WebShellEvent,
+} from "@/lib/web-shell-state";
 import { shouldHandleWebViewBack } from "@/lib/webview-back-navigation";
 import * as SplashScreen from "expo-splash-screen";
 
@@ -478,7 +478,9 @@ export function NativeWebShell() {
   const [nativeSplashReleased, setNativeSplashReleased] = useState(false);
   const [splashAnimationFinished, setSplashAnimationFinished] = useState(false);
   // Fixed for this launch: the animation never swaps theme mid-play.
-  const [splashTheme] = useState(() => initialSplashTheme(Boolean(nativePlatform)));
+  const [splashTheme] = useState(() =>
+    initialSplashTheme(Boolean(nativePlatform)),
+  );
   // The WebView is not opened until the site has answered once.
   const initialLaunchGate = nativePlatform
     ? INITIAL_LAUNCH_GATE
@@ -559,14 +561,20 @@ export function NativeWebShell() {
   // One request is both the reachability probe and the splash update check:
   // a 304 (or a fresh splash) proves the site answers.
   const probeLaunch = useCallback(async () => {
-    if (launchProbeInFlight.current || launchGateRef.current.status === "online")
+    if (
+      launchProbeInFlight.current ||
+      launchGateRef.current.status === "online"
+    )
       return;
     launchProbeInFlight.current = true;
     const retry = launchGateRef.current.wasOffline;
     dispatchLaunchGate({ type: "probe-started" });
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), LAUNCH_PROBE_TIMEOUT_MS);
+    const timeout = setTimeout(
+      () => controller.abort(),
+      LAUNCH_PROBE_TIMEOUT_MS,
+    );
     const [{ reachable }] = await Promise.all([
       checkForSplashUpdate(APP_URL, splashTheme, controller.signal),
       retry
@@ -602,7 +610,10 @@ export function NativeWebShell() {
       if (inFlight) return;
       inFlight = true;
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), RELEASE_CHECK_TIMEOUT_MS);
+      const timeout = setTimeout(
+        () => controller.abort(),
+        RELEASE_CHECK_TIMEOUT_MS,
+      );
       try {
         const response = await fetch(releaseStatusUrl(APP_URL, versionCode), {
           headers: { Accept: "application/json" },
@@ -1047,7 +1058,9 @@ export function NativeWebShell() {
         await MediaLibrary.createAssetAsync(downloaded.uri);
         showNotice("در گالری ذخیره شد.");
       } catch {
-        showNotice("ذخیره‌سازی ممکن نشد. اتصال را بررسی کنید و دوباره تلاش کنید.");
+        showNotice(
+          "ذخیره‌سازی ممکن نشد. اتصال را بررسی کنید و دوباره تلاش کنید.",
+        );
       } finally {
         savingMedia.current = false;
         try {
@@ -1338,7 +1351,9 @@ export function NativeWebShell() {
   );
 
   const webView =
-    nativeAuthStateResolved && initialWebUrl && launchGate.status === "online" ? (
+    nativeAuthStateResolved &&
+    initialWebUrl &&
+    launchGate.status === "online" ? (
       <WebView
         key={webViewGeneration}
         ref={webViewRef}
@@ -1456,7 +1471,9 @@ export function NativeWebShell() {
         onAnimationFinish={handleSplashAnimationFinish}
         onHidden={handleSplashHidden}
       />
-      {ANDROID_VERSION_CODE && release && requiresUpdate(ANDROID_VERSION_CODE, release) ? (
+      {ANDROID_VERSION_CODE &&
+      release &&
+      requiresUpdate(ANDROID_VERSION_CODE, release) ? (
         <ForceUpdateScreen
           status={release}
           theme={splashTheme}

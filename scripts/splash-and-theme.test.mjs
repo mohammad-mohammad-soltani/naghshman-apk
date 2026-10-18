@@ -84,8 +84,8 @@ test('plays the Lottie splash through once (capped) while the WebView warms visi
 
 test('never opens the WebView before the launch probe reached the site', () => {
   const source = readFileSync(new URL('src/components/native-web-shell.tsx', root), 'utf8');
-  assert.match(source, /nativeAuthStateResolved && initialWebUrl && launchGate\.status === "online" \?/);
+  assert.match(source, /nativeAuthStateResolved &&\s*initialWebUrl &&\s*launchGate\.status === "online" \?/);
   assert.match(source, /checkForSplashUpdate\(APP_URL, splashTheme, controller\.signal\)/);
-  assert.match(source, /setTimeout\(\(\) => controller\.abort\(\), LAUNCH_PROBE_TIMEOUT_MS\)/);
+  assert.match(source, /setTimeout\(\s*\(\) => controller\.abort\(\),\s*LAUNCH_PROBE_TIMEOUT_MS,?\s*\)/);
   assert.match(source, /if \(nativePlatform\) saveSplashTheme\(action\.theme\)/);
 });
