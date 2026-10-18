@@ -55,9 +55,11 @@ jobs:
       - name: Enforce 30 MiB APK ceiling
         run: npm run check:apk-size -- naghshman-myket.apk
 
+      # archive: false uploads the APK itself instead of a ZIP around it, so
+      # the run page downloads naghshman-myket.apk ready to install.
       - name: Upload accepted Myket APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: naghshman-myket-apk
           path: naghshman-myket.apk
+          archive: false
           if-no-files-found: error
