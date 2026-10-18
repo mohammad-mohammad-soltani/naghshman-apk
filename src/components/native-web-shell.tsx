@@ -1,7 +1,6 @@
 import * as Application from "expo-application";
 import * as Clipboard from "expo-clipboard";
 import Constants from "expo-constants";
-import { Directory, File, Paths } from "expo-file-system";
 import { NavigationBar } from "expo-navigation-bar";
 import { useNetworkState } from "expo-network";
 import * as SecureStore from "expo-secure-store";
@@ -16,20 +15,25 @@ import {
   Share,
   StatusBar,
   StyleSheet,
-  Text,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import {
   WebView,
   type WebViewMessageEvent,
   type WebViewNavigation,
 } from "react-native-webview";
 
+import { AppToast, type Notice } from "@/components/app-toast";
+import { DownloadTray } from "@/components/download-tray";
 import { ForceUpdateScreen } from "@/components/force-update-screen";
 import { LaunchSplash } from "@/components/launch-splash";
 import { MediaPickerHost } from "@/components/media-picker-sheet";
 import { useMediaPermissions } from "@/components/permission-sheet";
+import { useDownloads, type NoticeTone } from "@/components/use-downloads";
 import { useKeyboardInset } from "@/components/use-keyboard-inset";
 import { WebLoadError } from "@/components/web-load-error";
 import {
@@ -54,11 +58,6 @@ import {
   isLaunchSplashVisible,
   SPLASH_ANIMATION_CAP_MS,
 } from "@/lib/launch-splash-visibility";
-import {
-  galleryFilename,
-  isGalleryMedia,
-  openedFilename,
-} from "@/lib/media-save";
 import {
   initialNativeWebUrl,
   shouldAllowNativeGuestNavigation,
@@ -95,8 +94,8 @@ import * as SplashScreen from "expo-splash-screen";
 const APP_URL = "https://naghshman.ir";
 const REFRESH_TOKEN_KEY = "naghshman.refresh-token";
 const BRAND_BACKGROUND = "#dc2626";
-// Downloaded attachments handed to a viewer app (FileProvider: cache-path).
-const openedFilesDirectory = () => new Directory(Paths.cache, "opened-files");
+// The site's bottom navigation is 64px tall; floating cards sit just above it.
+const FLOATING_CLEARANCE = 76;
 const OFFLINE_NOTICE = "اینترنت قطع است؛ دوباره تلاش می‌کنیم.";
 const RETRYING_NOTICE = "ارتباط برقرار نشد؛ دوباره تلاش می‌کنیم.";
 /** The Android versionCode of this install; null in dev runtimes and on iOS. */
@@ -514,6 +513,7 @@ export function NativeWebShell() {
   const webViewRef = useRef<WebView>(null);
   const webFrameRef = useRef<View>(null);
   const keyboardInset = useKeyboardInset(webFrameRef);
+  const insets = useSafeAreaInsets();
   const canGoBackRef = useRef(false);
   const hasHiddenNativeSplashRef = useRef(false);
   const restoreAttemptedToken = useRef<string | null>(null);
@@ -559,7 +559,8 @@ export function NativeWebShell() {
     ANDROID_VERSION_CODE ? readStoredRelease() : null,
   );
   const [safeAreaBackground, setSafeAreaBackground] = useState("#ffffff");
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const noticeSequence = useRef(0);
   const [storedRefreshToken, setStoredRefreshToken] = useState<
     string | null | undefined
   >(nativePlatform ? undefined : null);
@@ -992,14 +993,17 @@ export function NativeWebShell() {
     redirectFailure,
   ]);
 
-  const showNotice = useCallback((message: string) => {
-    setNotice(message);
-    if (noticeTimer.current) clearTimeout(noticeTimer.current);
-    noticeTimer.current = setTimeout(() => {
-      noticeTimer.current = null;
-      setNotice(null);
-    }, 3200);
-  }, []);
+  const showNotice = useCallback(
+    (message: string, tone: NoticeTone = "info") => {
+      setNotice({ id: ++noticeSequence.current, message, tone });
+      if (noticeTimer.current) clearTimeout(noticeTimer.current);
+      noticeTimer.current = setTimeout(() => {
+        noticeTimer.current = null;
+        setNotice(null);
+      }, 3200);
+    },
+    [],
+  );
 
   useEffect(
     () => () => {
@@ -1105,127 +1109,9 @@ export function NativeWebShell() {
     [safeAreaBackground],
   );
 
-  const savingMedia = useRef(false);
-  const saveMedia = useCallback(
-    async (url: string) => {
-      if (Platform.OS !== "android") return;
-      // A second tap while a large video downloads must not start a duplicate.
-      if (savingMedia.current) {
-        showNotice("در حال ذخیرهٔ رسانهٔ قبلی هستیم…");
-        return;
-      }
-      savingMedia.current = true;
-      let folder: Directory | null = null;
-
-      try {
-        // Expo Go on Android does not bundle the full media-library native module.
-        // Loading it only when saving keeps the rest of the app usable in Expo Go.
-        const MediaLibrary = await import("expo-media-library/legacy");
-        const permission = await MediaLibrary.requestPermissionsAsync(true, [
-          "photo",
-          "video",
-        ]);
-        if (permission.status !== "granted") {
-          showNotice("برای ذخیره، اجازهٔ دسترسی به گالری لازم است.");
-          return;
-        }
-
-        showNotice("در حال ذخیره در گالری…");
-        // Download into an empty folder: the file is then named from the
-        // response's Content-Type, so proxied media without an extension in its
-        // URL (e.g. /api/content/1/media/2) still lands as .mp4 or .jpg.
-        folder = new Directory(Paths.cache, `media-${Date.now()}`);
-        folder.create({ intermediates: true, idempotent: true });
-        const downloaded = await File.downloadFileAsync(url, folder, {
-          idempotent: true,
-        });
-        if (!isGalleryMedia(downloaded.name)) {
-          showNotice("این فایل تصویر یا ویدیو نیست و در گالری ذخیره نمی‌شود.");
-          return;
-        }
-        downloaded.rename(galleryFilename(downloaded.name, Date.now()));
-        await MediaLibrary.createAssetAsync(downloaded.uri);
-        showNotice("در گالری ذخیره شد.");
-      } catch {
-        showNotice(
-          "ذخیره‌سازی ممکن نشد. اتصال را بررسی کنید و دوباره تلاش کنید.",
-        );
-      } finally {
-        savingMedia.current = false;
-        try {
-          // MediaStore keeps its own copy; the download is only a staging file.
-          folder?.delete();
-        } catch {
-          // The OS clears the cache directory eventually.
-        }
-      }
-    },
-    [showNotice],
-  );
-
-  // Attachments already downloaded this session open again without the network.
-  const openedFiles = useRef(new Map<string, string>());
-  const openingFile = useRef(false);
-  const openFile = useCallback(
-    async (url: string, filename?: string) => {
-      // Without the native module (iOS, Expo Go) the in-app browser previews it.
-      if (Platform.OS !== "android" || !MediaChooser) {
-        openExternal(url);
-        return;
-      }
-      const chooser = MediaChooser;
-      if (openingFile.current) {
-        showNotice("در حال دریافت فایل قبلی هستیم…");
-        return;
-      }
-      openingFile.current = true;
-      let folder: Directory | null = null;
-      try {
-        let uri = openedFiles.current.get(url);
-        if (!uri || !new File(uri).exists) {
-          showNotice("در حال دریافت فایل…");
-          folder = new Directory(openedFilesDirectory(), String(Date.now()));
-          folder.create({ intermediates: true, idempotent: true });
-          // Attachments behind the site's session need its cookies.
-          const cookie = chooser.cookiesFor(url);
-          const downloaded = await File.downloadFileAsync(url, folder, {
-            idempotent: true,
-            headers: cookie ? { Cookie: cookie } : undefined,
-          });
-          const name = openedFilename(filename, downloaded.name);
-          if (name !== downloaded.name) downloaded.rename(name);
-          uri = downloaded.uri;
-          openedFiles.current.set(url, uri);
-          // The viewer app reads it from here, so it stays until next launch.
-          folder = null;
-        }
-        if (!(await chooser.openFile(uri, null))) {
-          showNotice("برنامه‌ای برای باز کردن این فایل روی گوشی نصب نیست.");
-        }
-      } catch {
-        showNotice("دریافت فایل ممکن نشد. اتصال را بررسی کنید و دوباره تلاش کنید.");
-        try {
-          folder?.delete();
-        } catch {
-          // The OS clears the cache directory eventually.
-        }
-      } finally {
-        openingFile.current = false;
-      }
-    },
-    [openExternal, showNotice],
-  );
-
-  // Files opened in a previous run are no longer read by any viewer app.
-  useEffect(() => {
-    if (Platform.OS !== "android") return;
-    try {
-      const directory = openedFilesDirectory();
-      if (directory.exists) directory.delete();
-    } catch {
-      // The OS clears the cache directory eventually.
-    }
-  }, []);
+  const downloads = useDownloads(showNotice, openExternal);
+  const { openFile, saveMedia } = downloads;
+  const [trayHeight, setTrayHeight] = useState(0);
 
   const handleMessage = useCallback(
     async (event: WebViewMessageEvent) => {
@@ -1241,7 +1127,7 @@ export function NativeWebShell() {
           if (nativePlatform) saveSplashTheme(action.theme);
           break;
         case "save-media":
-          await saveMedia(action.url);
+          await saveMedia(action.url, action.filename);
           break;
         case "open-file":
           await openFile(action.url, action.filename);
@@ -1251,7 +1137,7 @@ export function NativeWebShell() {
           break;
         case "copy-link":
           await Clipboard.setStringAsync(action.url);
-          showNotice("پیوند کپی شد.");
+          showNotice("پیوند کپی شد.", "success");
           break;
         case "open-browser":
           await Linking.openURL(action.url);
@@ -1265,7 +1151,10 @@ export function NativeWebShell() {
             // This event doubles as the web login's persistence acknowledgement.
             setNativeAuthentication(true);
           } catch {
-            showNotice("ذخیره‌سازی ورود در گوشی انجام نشد. دوباره تلاش کنید.");
+            showNotice(
+              "ذخیره‌سازی ورود در گوشی انجام نشد. دوباره تلاش کنید.",
+              "error",
+            );
             webViewRef.current?.injectJavaScript(
               "window.dispatchEvent(new Event('naghshman:native-auth-error')); true;",
             );
@@ -1519,6 +1408,13 @@ export function NativeWebShell() {
   const splashBarStyle =
     splashTheme === "light" ? "dark-content" : "light-content";
 
+  const floatingTheme = lightWebTheme ? "light" : "dark";
+  // Floating cards clear the site's bottom navigation, or sit on the keyboard.
+  const floatingBottom =
+    keyboardInset > 0
+      ? keyboardInset + insets.bottom + 12
+      : insets.bottom + FLOATING_CLEARANCE;
+
   const recovery = (
     <WebLoadError
       offline={!shellState.online}
@@ -1635,25 +1531,21 @@ export function NativeWebShell() {
           {recovery}
         </SafeAreaView>
       )}
-      {notice && (
-        <View
-          pointerEvents="none"
-          accessibilityLiveRegion="polite"
-          style={[
-            styles.notice,
-            lightWebTheme ? styles.noticeLight : styles.noticeDark,
-          ]}
-        >
-          <Text
-            style={[
-              styles.noticeText,
-              { color: lightWebTheme ? "#101010" : "#f5f5f7" },
-            ]}
-          >
-            {notice}
-          </Text>
-        </View>
-      )}
+      <DownloadTray
+        items={downloads.items}
+        theme={floatingTheme}
+        bottom={floatingBottom}
+        onCancel={downloads.cancel}
+        onRetry={downloads.retry}
+        onOpen={downloads.open}
+        onClearSettled={downloads.clearSettled}
+        onHeightChange={setTrayHeight}
+      />
+      <AppToast
+        notice={notice}
+        theme={floatingTheme}
+        bottom={floatingBottom + (trayHeight ? trayHeight + 10 : 0)}
+      />
       {Platform.OS === "android" && MediaChooser ? (
         <MediaPickerHost theme={chromeTheme} onNotice={showNotice} />
       ) : null}
@@ -1696,28 +1588,4 @@ const styles = StyleSheet.create({
   webFrame: { flex: 1, backgroundColor: "#ffffff" },
   webView: { flex: 1, backgroundColor: "#ffffff" },
   webViewErrorFallback: { flex: 1 },
-  notice: {
-    position: "absolute",
-    zIndex: 3000,
-    bottom: 34,
-    left: 20,
-    right: 20,
-    borderRadius: 16,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    shadowColor: "#000000",
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.18,
-    shadowRadius: 24,
-    elevation: 10,
-  },
-  // The site's popover surfaces (`--popover`), so a toast reads as part of it.
-  noticeLight: { backgroundColor: "#ffffff", borderColor: "#e8e8ec" },
-  noticeDark: { backgroundColor: "#242424", borderColor: "#333333" },
-  noticeText: {
-    fontFamily: "Yekan",
-    fontSize: 14,
-    textAlign: "center",
-  },
 });

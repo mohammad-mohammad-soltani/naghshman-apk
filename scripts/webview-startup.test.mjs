@@ -27,7 +27,7 @@ function mountShell() {
     react,
     'react/jsx-runtime': { jsx, jsxs: jsx },
     'react-native': { Platform: { OS: 'web' }, StyleSheet: { create: (x) => x }, View: 'View', Text: 'Text', Pressable: 'Pressable', StatusBar: 'StatusBar' },
-    'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' },
+    'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView', useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }) },
     'react-native-webview': { WebView: 'WebView' },
     'expo-network': { useNetworkState: () => ({ isConnected: true }) },
     'expo-constants': { default: { executionEnvironment: 'storeClient' } },
@@ -35,6 +35,11 @@ function mountShell() {
     '@/components/force-update-screen': { ForceUpdateScreen: 'ForceUpdateScreen' },
     '@/components/media-picker-sheet': { MediaPickerHost: 'MediaPickerHost' },
     '@/components/permission-sheet': { useMediaPermissions: () => ({ ensure: async () => true, sheet: null }) },
+    '@/components/app-toast': { AppToast: 'AppToast' },
+    '@/components/download-tray': { DownloadTray: 'DownloadTray' },
+    '@/components/use-downloads': {
+      useDownloads: () => ({ items: [], openFile: async () => {}, saveMedia: async () => {}, cancel() {}, retry() {}, open() {}, clearSettled() {} }),
+    },
     '../../modules/naghshman-media-chooser': { default: null },
   };
   const root = resolve(new URL('../', import.meta.url).pathname);
