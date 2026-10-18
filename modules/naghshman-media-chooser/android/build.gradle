@@ -1,0 +1,22 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'ir.naghshman'
+version = '1.0.0'
+
+android {
+  namespace "expo.modules.naghshmanmediachooser"
+  defaultConfig {
+    versionCode 1
+    versionName '1.0.0'
+  }
+}
+
+dependencies {
+  implementation "androidx.core:core-ktx:1.17.0"
+  // The app always ships react-native-webview; this module only hooks its
+  // (patched) file chooser, see patches/react-native-webview+*.patch.
+  compileOnly project(':react-native-webview')
+}

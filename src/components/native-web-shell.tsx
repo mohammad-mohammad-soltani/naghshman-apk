@@ -5,6 +5,7 @@ import { Directory, File, Paths } from "expo-file-system";
 import { NavigationBar } from "expo-navigation-bar";
 import { useNetworkState } from "expo-network";
 import * as SecureStore from "expo-secure-store";
+import * as WebBrowser from "expo-web-browser";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Appearance,
@@ -27,6 +28,8 @@ import {
 
 import { ForceUpdateScreen } from "@/components/force-update-screen";
 import { LaunchSplash } from "@/components/launch-splash";
+import { MediaPickerHost } from "@/components/media-picker-sheet";
+import { useMediaPermissions } from "@/components/permission-sheet";
 import { WebLoadError } from "@/components/web-load-error";
 import {
   parseAppReleaseStatus,
@@ -56,6 +59,7 @@ import {
   shouldAllowNativeGuestNavigation,
 } from "@/lib/native-auth-gate";
 import { isAllowedWebUrl, parseNativeBridgeMessage } from "@/lib/native-bridge";
+import MediaChooser from "../../modules/naghshman-media-chooser";
 import {
   isExpoPushToken,
   nativeNotificationRoute,
@@ -207,6 +211,36 @@ function nativeBootstrap(
         body: JSON.stringify({ token: token, platform: platform })
       }).catch(function () {});
     });
+    // Android only prompts for the microphone/camera when the app asks for
+    // it, so ask natively before the page's getUserMedia. Once granted, the
+    // WebView's own permission request succeeds without another prompt.
+    var mediaDevices = navigator.mediaDevices;
+    if ('${platform}' === 'android' && mediaDevices && typeof mediaDevices.getUserMedia === 'function') {
+      var originalGetUserMedia = mediaDevices.getUserMedia.bind(mediaDevices);
+      var pendingMediaPermissions = {};
+      var mediaPermissionSequence = 0;
+      window.addEventListener('naghshman:media-permission', function (event) {
+        var detail = event && event.detail;
+        var settle = detail && pendingMediaPermissions[detail.requestId];
+        if (!settle) return;
+        delete pendingMediaPermissions[detail.requestId];
+        settle(detail.granted === true);
+      });
+      mediaDevices.getUserMedia = function (constraints) {
+        var kinds = [];
+        if (constraints && constraints.audio) kinds.push('microphone');
+        if (constraints && constraints.video) kinds.push('camera');
+        if (!kinds.length) return originalGetUserMedia(constraints);
+        var requestId = 'm' + (++mediaPermissionSequence) + '-' + Date.now();
+        return new Promise(function (resolve) {
+          pendingMediaPermissions[requestId] = resolve;
+          post({ type: 'ensure-media-permission', requestId: requestId, kinds: kinds });
+        }).then(function (granted) {
+          if (!granted) throw new DOMException('Permission denied', 'NotAllowedError');
+          return originalGetUserMedia(constraints);
+        });
+      };
+    }
     window.dispatchEvent(new Event('naghshman:native-ready'));
     }
 
@@ -1016,6 +1050,29 @@ export function NativeWebShell() {
     syncNativePushToken();
   }, [syncNativePushToken]);
 
+  const chromeTheme = safeAreaBackground === "#ffffff" ? "light" : "dark";
+  const { ensure: ensureMediaPermissions, sheet: permissionSheet } =
+    useMediaPermissions(chromeTheme);
+
+  // Links off the site open in an in-app browser tab over the app, the way
+  // X and Telegram do, instead of switching to another app.
+  const openExternal = useCallback(
+    (url: string) => {
+      if (!/^https?:\/\//iu.test(url)) {
+        Linking.openURL(url).catch(() => {});
+        return;
+      }
+      WebBrowser.openBrowserAsync(url, {
+        toolbarColor: safeAreaBackground,
+        controlsColor: BRAND_BACKGROUND,
+        showTitle: true,
+        enableBarCollapsing: true,
+        createTask: false,
+      }).catch(() => Linking.openURL(url).catch(() => {}));
+    },
+    [safeAreaBackground],
+  );
+
   const savingMedia = useRef(false);
   const saveMedia = useCallback(
     async (url: string) => {
@@ -1115,6 +1172,21 @@ export function NativeWebShell() {
             );
           }
           break;
+        case "ensure-media-permission": {
+          let granted = false;
+          try {
+            granted = await ensureMediaPermissions(action.kinds);
+          } catch {
+            // Answer the page either way; it shows its own denied state.
+          }
+          webViewRef.current?.injectJavaScript(`
+            window.dispatchEvent(new CustomEvent('naghshman:media-permission', {
+              detail: ${JSON.stringify({ requestId: action.requestId, granted })}
+            }));
+            true;
+          `);
+          break;
+        }
         case "clear-refresh":
           await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
           restoreAttemptedToken.current = null;
@@ -1124,7 +1196,13 @@ export function NativeWebShell() {
           break;
       }
     },
-    [nativePlatform, saveMedia, setNativeAuthentication, showNotice],
+    [
+      ensureMediaPermissions,
+      nativePlatform,
+      saveMedia,
+      setNativeAuthentication,
+      showNotice,
+    ],
   );
 
   const handleLoadEnd = useCallback(
@@ -1303,7 +1381,7 @@ export function NativeWebShell() {
     (request: WebViewNavigation) => {
       if (request.url === "about:blank") return true;
       if (!isAllowedWebUrl(request.url)) {
-        void Linking.openURL(request.url);
+        openExternal(request.url);
         return false;
       }
       if (
@@ -1319,7 +1397,7 @@ export function NativeWebShell() {
       if (isAllowedWebUrl(request.url)) return true;
       return false;
     },
-    [nativePlatform],
+    [nativePlatform, openExternal],
   );
 
   const launchOffline = showsOfflineCard(launchGate);
@@ -1367,6 +1445,10 @@ export function NativeWebShell() {
         thirdPartyCookiesEnabled
         cacheEnabled
         pullToRefreshEnabled={false}
+        allowsInlineMediaPlayback
+        // iOS already shows its system microphone/camera prompt for the app;
+        // WKWebView must not stack a second, per-site prompt on top of it.
+        mediaCapturePermissionGrantType="grant"
         androidLayerType={Platform.OS === "android" ? "hardware" : undefined}
         automaticallyAdjustContentInsets={false}
         contentInsetAdjustmentBehavior="never"
@@ -1461,6 +1543,10 @@ export function NativeWebShell() {
           </Text>
         </View>
       )}
+      {Platform.OS === "android" && MediaChooser ? (
+        <MediaPickerHost theme={chromeTheme} onNotice={showNotice} />
+      ) : null}
+      {permissionSheet}
       <LaunchSplash
         visible={launchSplashVisible}
         theme={splashTheme}

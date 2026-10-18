@@ -101,3 +101,23 @@ test('accepts object-storage media for gallery actions but never for navigation'
     { type: 'save-media', url: arvan, filename: undefined },
   );
 });
+
+test('a page may ask for microphone or camera access, nothing else', () => {
+  const message = (fields: Record<string, unknown>) =>
+    JSON.stringify({ source: 'naghshman-web', version: 1, type: 'ensure-media-permission', ...fields });
+
+  assert.deepEqual(parseNativeBridgeMessage(message({ requestId: 'p1-1700000000000', kinds: ['microphone'] })), {
+    type: 'ensure-media-permission',
+    requestId: 'p1-1700000000000',
+    kinds: ['microphone'],
+  });
+  assert.deepEqual(parseNativeBridgeMessage(message({ requestId: 'p2', kinds: ['camera', 'microphone'] })), {
+    type: 'ensure-media-permission',
+    requestId: 'p2',
+    kinds: ['microphone', 'camera'],
+  });
+  assert.equal(parseNativeBridgeMessage(message({ requestId: 'p3', kinds: ['location'] })), null);
+  assert.equal(parseNativeBridgeMessage(message({ requestId: 'p4', kinds: ['microphone', 'contacts'] })), null);
+  assert.equal(parseNativeBridgeMessage(message({ requestId: 'p5', kinds: [] })), null);
+  assert.equal(parseNativeBridgeMessage(message({ requestId: "x'); alert(1); ('", kinds: ['microphone'] })), null);
+});

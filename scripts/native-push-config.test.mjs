@@ -23,3 +23,23 @@ test('push registration is retried on foreground and failures are logged, not sw
   assert.match(shell, /console\.warn\("\[push\] Could not register for notifications:"/);
   assert.match(shell, /setNotificationChannelAsync\("default"/);
 });
+
+test('voice messages and the camera can ask Android for access', () => {
+  for (const permission of ['RECORD_AUDIO', 'MODIFY_AUDIO_SETTINGS', 'CAMERA']) {
+    assert.ok(app.android.permissions.includes(`android.permission.${permission}`), `${permission} must be declared`);
+  }
+  const [, picker] = app.plugins.find((plugin) => Array.isArray(plugin) && plugin[0] === 'expo-image-picker');
+  assert.ok(picker.microphonePermission && picker.cameraPermission && picker.photosPermission);
+});
+
+test('photo and video inputs are answered by the in-app media sheet', () => {
+  const pkg = JSON.parse(readFileSync(new URL('package.json', root), 'utf8'));
+  assert.equal(pkg.scripts.postinstall, 'patch-package');
+  const patch = readFileSync(new URL('patches/react-native-webview+13.16.1.patch', root), 'utf8');
+  assert.match(patch, /fileChooserInterceptor/);
+  const module = readFileSync(
+    new URL('modules/naghshman-media-chooser/android/src/main/java/expo/modules/naghshmanmediachooser/NaghshmanMediaChooserModule.kt', root),
+    'utf8',
+  );
+  assert.match(module, /RNCWebChromeClient\.fileChooserInterceptor = interceptor/);
+});

@@ -21,7 +21,12 @@
       "package": "ir.naghshman.app",
       "versionCode": 2,
       "backgroundColor": "#ffffff",
-      "userInterfaceStyle": "automatic"
+      "userInterfaceStyle": "automatic",
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.CAMERA"
+      ]
     },
     "web": {
       "output": "static",
@@ -72,6 +77,15 @@
         }
       ],
       "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "نقش من برای انتخاب و ارسال عکس و ویدیو به گالری دسترسی می‌خواهد.",
+          "cameraPermission": "نقش من برای گرفتن عکس و فیلم و ارسال آن به دوربین دسترسی می‌خواهد.",
+          "microphonePermission": "نقش من برای ضبط و ارسال پیام صوتی به میکروفون دسترسی می‌خواهد."
+        }
+      ],
+      "expo-web-browser",
       [
         "expo-notifications",
         {

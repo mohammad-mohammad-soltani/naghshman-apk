@@ -14,7 +14,11 @@ export type NativeBridgeAction =
   | { type: 'copy-link'; url: string }
   | { type: 'open-browser'; url: string }
   | { type: 'persist-refresh'; token: string }
-  | { type: 'clear-refresh' };
+  | { type: 'clear-refresh' }
+  | { type: 'ensure-media-permission'; requestId: string; kinds: MediaPermissionKind[] };
+
+export type MediaPermissionKind = 'microphone' | 'camera';
+const MEDIA_PERMISSION_KINDS: readonly MediaPermissionKind[] = ['microphone', 'camera'];
 
 // Uploads are served from object storage and legacy deployment hosts, never
 // navigated to. These may be saved, shared or opened, but not loaded in-app.
@@ -31,6 +35,8 @@ type BridgeEnvelope = {
   filename?: unknown;
   title?: unknown;
   token?: unknown;
+  requestId?: unknown;
+  kinds?: unknown;
 };
 
 export function isAllowedWebUrl(value: string): boolean {
@@ -94,6 +100,14 @@ export function parseNativeBridgeMessage(value: string): NativeBridgeAction | nu
           theme: message.theme,
         }
       : null;
+  }
+
+  if (message.type === 'ensure-media-permission') {
+    if (typeof message.requestId !== 'string' || !/^[\w-]{1,64}$/u.test(message.requestId)) return null;
+    if (!Array.isArray(message.kinds) || message.kinds.length === 0) return null;
+    const kinds = MEDIA_PERMISSION_KINDS.filter((kind) => (message.kinds as unknown[]).includes(kind));
+    if (kinds.length !== new Set(message.kinds).size) return null;
+    return { type: 'ensure-media-permission', requestId: message.requestId, kinds };
   }
 
   if (message.type === 'persist-refresh') {

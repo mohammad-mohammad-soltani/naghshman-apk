@@ -1,0 +1,13 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application>
+    <provider
+      android:name="expo.modules.naghshmanmediachooser.MediaChooserFileProvider"
+      android:authorities="${applicationId}.mediachooser"
+      android:exported="false"
+      android:grantUriPermissions="true">
+      <meta-data
+        android:name="android.support.FILE_PROVIDER_PATHS"
+        android:resource="@xml/naghshman_media_chooser_paths" />
+    </provider>
+  </application>
+</manifest>

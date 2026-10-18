@@ -1,0 +1,43 @@
+diff --git a/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebChromeClient.java b/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebChromeClient.java
+index 07f73fd..ada5618 100644
+--- a/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebChromeClient.java
++++ b/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebChromeClient.java
+@@ -50,6 +50,18 @@ public class RNCWebChromeClient extends WebChromeClient implements LifecycleEven
+ 
+     protected static final int COMMON_PERMISSION_REQUEST = 3;
+ 
++    /**
++     * Lets the app replace the system file chooser, e.g. with an in-app media
++     * sheet. Return false to keep the stock chooser. A handler that returns true
++     * owns filePathCallback and must answer it exactly once; systemChooser opens
++     * the stock chooser for that same callback instead.
++     */
++    public interface FileChooserInterceptor {
++        boolean onShowFileChooser(ValueCallback<Uri[]> filePathCallback, String[] acceptTypes, boolean allowMultiple, boolean captureEnabled, Runnable systemChooser);
++    }
++
++    public static volatile FileChooserInterceptor fileChooserInterceptor;
++
+     protected RNCWebView mWebView;
+ 
+     protected View mVideoView;
+@@ -332,8 +344,18 @@ public class RNCWebChromeClient extends WebChromeClient implements LifecycleEven
+     public boolean onShowFileChooser(WebView webView, ValueCallback<Uri[]> filePathCallback, FileChooserParams fileChooserParams) {
+         String[] acceptTypes = fileChooserParams.getAcceptTypes();
+         boolean allowMultiple = fileChooserParams.getMode() == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE;
++        boolean captureEnabled = fileChooserParams.isCaptureEnabled();
++        RNCWebViewModule module = this.mWebView.getThemedReactContext().getNativeModule(RNCWebViewModule.class);
++
++        FileChooserInterceptor interceptor = fileChooserInterceptor;
++        if (interceptor != null) {
++            Runnable systemChooser = () -> module.startPhotoPickerIntent(filePathCallback, acceptTypes, allowMultiple, false);
++            if (interceptor.onShowFileChooser(filePathCallback, acceptTypes, allowMultiple, captureEnabled, systemChooser)) {
++                return true;
++            }
++        }
+ 
+-        return this.mWebView.getThemedReactContext().getNativeModule(RNCWebViewModule.class).startPhotoPickerIntent(filePathCallback, acceptTypes, allowMultiple, fileChooserParams.isCaptureEnabled());
++        return module.startPhotoPickerIntent(filePathCallback, acceptTypes, allowMultiple, captureEnabled);
+     }
+ 
+     @Override

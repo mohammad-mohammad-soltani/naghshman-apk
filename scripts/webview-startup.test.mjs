@@ -33,6 +33,9 @@ function mountShell() {
     'expo-constants': { default: { executionEnvironment: 'storeClient' } },
     '@/components/launch-splash': { LaunchSplash: 'LaunchSplash' },
     '@/components/force-update-screen': { ForceUpdateScreen: 'ForceUpdateScreen' },
+    '@/components/media-picker-sheet': { MediaPickerHost: 'MediaPickerHost' },
+    '@/components/permission-sheet': { useMediaPermissions: () => ({ ensure: async () => true, sheet: null }) },
+    '../../modules/naghshman-media-chooser': { default: null },
   };
   const root = resolve(new URL('../', import.meta.url).pathname);
   const require = createRequire(import.meta.url);
