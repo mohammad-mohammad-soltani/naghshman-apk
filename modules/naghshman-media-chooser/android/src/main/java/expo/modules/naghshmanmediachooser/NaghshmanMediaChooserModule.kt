@@ -1,13 +1,18 @@
 package expo.modules.naghshmanmediachooser
 
+import android.content.ActivityNotFoundException
 import android.content.ContentUris
+import android.content.Intent
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
+import android.webkit.CookieManager
+import android.webkit.MimeTypeMap
 import android.webkit.ValueCallback
 import androidx.core.content.FileProvider
 import com.reactnativecommunity.webview.RNCWebChromeClient
+import expo.modules.kotlin.functions.Queues
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.kotlin.records.Field
@@ -157,6 +162,42 @@ class NaghshmanMediaChooserModule : Module() {
     Function("cancel") {
       main.post { answer(null) }
     }
+
+    /**
+     * The WebView's cookies for `url`, so a file the page links to can be
+     * downloaded natively with the same session. CookieManager only returns
+     * cookies that the WebView would itself send to that URL.
+     */
+    Function("cookiesFor") { url: String ->
+      CookieManager.getInstance().getCookie(url)
+    }
+
+    /**
+     * Opens a downloaded file from the app's cache in whichever app handles
+     * its type (a PDF viewer, an office app, ...). False when no app can.
+     */
+    AsyncFunction("openFile") { path: String, mimeType: String? ->
+      val activity = appContext.currentActivity ?: return@AsyncFunction false
+      val file = File(Uri.parse(path).path ?: path)
+      val uri = try {
+        FileProvider.getUriForFile(activity, "${activity.packageName}.mediachooser", file)
+      } catch (_: IllegalArgumentException) {
+        return@AsyncFunction false
+      }
+      val type = mimeType?.takeIf { it.contains('/') }
+        ?: MimeTypeMap.getSingleton().getMimeTypeFromExtension(file.extension.lowercase())
+        ?: "*/*"
+      val intent = Intent(Intent.ACTION_VIEW)
+        .setDataAndType(uri, type)
+        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      try {
+        // Like Telegram: the phone's default app for the type, or its own picker.
+        activity.startActivity(intent)
+        true
+      } catch (_: ActivityNotFoundException) {
+        false
+      }
+    }.runOnQueue(Queues.MAIN)
 
     /** Opens the stock chooser (Files, other apps) for the pending request. */
     Function("openSystemChooser") {

@@ -54,7 +54,11 @@ import {
   isLaunchSplashVisible,
   SPLASH_ANIMATION_CAP_MS,
 } from "@/lib/launch-splash-visibility";
-import { galleryFilename, isGalleryMedia } from "@/lib/media-save";
+import {
+  galleryFilename,
+  isGalleryMedia,
+  openedFilename,
+} from "@/lib/media-save";
 import {
   initialNativeWebUrl,
   shouldAllowNativeGuestNavigation,
@@ -91,6 +95,8 @@ import * as SplashScreen from "expo-splash-screen";
 const APP_URL = "https://naghshman.ir";
 const REFRESH_TOKEN_KEY = "naghshman.refresh-token";
 const BRAND_BACKGROUND = "#dc2626";
+// Downloaded attachments handed to a viewer app (FileProvider: cache-path).
+const openedFilesDirectory = () => new Directory(Paths.cache, "opened-files");
 const OFFLINE_NOTICE = "اینترنت قطع است؛ دوباره تلاش می‌کنیم.";
 const RETRYING_NOTICE = "ارتباط برقرار نشد؛ دوباره تلاش می‌کنیم.";
 /** The Android versionCode of this install; null in dev runtimes and on iOS. */
@@ -133,6 +139,11 @@ function statusBarStyleFor(
   return luminance > 160 ? "dark-content" : "light-content";
 }
 
+function nativeFeatures(platform: "android" | "ios"): string[] {
+  // Opening attachments in a viewer app needs the Android native module.
+  return platform === "android" && MediaChooser ? ["open-file"] : [];
+}
+
 function nativeBootstrap(
   platform: "android" | "ios",
   initiallyAuthenticated: boolean,
@@ -141,7 +152,12 @@ function nativeBootstrap(
   (function () {
     var nativeAlreadyInitialized = Boolean(window.NaghshmanNative);
     if (!nativeAlreadyInitialized) {
-      window.NaghshmanNative = Object.freeze({ platform: '${platform}', version: 1 });
+      // features lets the site use a newer action only where the app has it.
+      window.NaghshmanNative = Object.freeze({
+        platform: '${platform}',
+        version: 1,
+        features: Object.freeze(${JSON.stringify(nativeFeatures(platform))})
+      });
     var post = function (payload) {
       if (window.ReactNativeWebView && typeof window.ReactNativeWebView.postMessage === 'function') {
         window.ReactNativeWebView.postMessage(JSON.stringify(Object.assign({
@@ -1147,6 +1163,70 @@ export function NativeWebShell() {
     [showNotice],
   );
 
+  // Attachments already downloaded this session open again without the network.
+  const openedFiles = useRef(new Map<string, string>());
+  const openingFile = useRef(false);
+  const openFile = useCallback(
+    async (url: string, filename?: string) => {
+      // Without the native module (iOS, Expo Go) the in-app browser previews it.
+      if (Platform.OS !== "android" || !MediaChooser) {
+        openExternal(url);
+        return;
+      }
+      const chooser = MediaChooser;
+      if (openingFile.current) {
+        showNotice("در حال دریافت فایل قبلی هستیم…");
+        return;
+      }
+      openingFile.current = true;
+      let folder: Directory | null = null;
+      try {
+        let uri = openedFiles.current.get(url);
+        if (!uri || !new File(uri).exists) {
+          showNotice("در حال دریافت فایل…");
+          folder = new Directory(openedFilesDirectory(), String(Date.now()));
+          folder.create({ intermediates: true, idempotent: true });
+          // Attachments behind the site's session need its cookies.
+          const cookie = chooser.cookiesFor(url);
+          const downloaded = await File.downloadFileAsync(url, folder, {
+            idempotent: true,
+            headers: cookie ? { Cookie: cookie } : undefined,
+          });
+          const name = openedFilename(filename, downloaded.name);
+          if (name !== downloaded.name) downloaded.rename(name);
+          uri = downloaded.uri;
+          openedFiles.current.set(url, uri);
+          // The viewer app reads it from here, so it stays until next launch.
+          folder = null;
+        }
+        if (!(await chooser.openFile(uri, null))) {
+          showNotice("برنامه‌ای برای باز کردن این فایل روی گوشی نصب نیست.");
+        }
+      } catch {
+        showNotice("دریافت فایل ممکن نشد. اتصال را بررسی کنید و دوباره تلاش کنید.");
+        try {
+          folder?.delete();
+        } catch {
+          // The OS clears the cache directory eventually.
+        }
+      } finally {
+        openingFile.current = false;
+      }
+    },
+    [openExternal, showNotice],
+  );
+
+  // Files opened in a previous run are no longer read by any viewer app.
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    try {
+      const directory = openedFilesDirectory();
+      if (directory.exists) directory.delete();
+    } catch {
+      // The OS clears the cache directory eventually.
+    }
+  }, []);
+
   const handleMessage = useCallback(
     async (event: WebViewMessageEvent) => {
       const action = parseNativeBridgeMessage(event.nativeEvent.data);
@@ -1162,6 +1242,9 @@ export function NativeWebShell() {
           break;
         case "save-media":
           await saveMedia(action.url);
+          break;
+        case "open-file":
+          await openFile(action.url, action.filename);
           break;
         case "share":
           await Share.share({ message: action.url, title: action.title });
@@ -1215,6 +1298,7 @@ export function NativeWebShell() {
     [
       ensureMediaPermissions,
       nativePlatform,
+      openFile,
       saveMedia,
       setNativeAuthentication,
       showNotice,

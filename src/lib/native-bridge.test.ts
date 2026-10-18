@@ -121,3 +121,13 @@ test('a page may ask for microphone or camera access, nothing else', () => {
   assert.equal(parseNativeBridgeMessage(message({ requestId: 'p5', kinds: [] })), null);
   assert.equal(parseNativeBridgeMessage(message({ requestId: "x'); alert(1); ('", kinds: ['microphone'] })), null);
 });
+
+test('opens an attachment only from the site or its media hosts', () => {
+  const message = (url: string) =>
+    JSON.stringify({ source: 'naghshman-web', version: 1, type: 'open-file', url, filename: 'گزارش.pdf' });
+  const pdf = 'https://naghshman-media.s3.ir-thr-at1.arvanstorage.ir/production/report.pdf';
+
+  assert.deepEqual(parseNativeBridgeMessage(message(pdf)), { type: 'open-file', url: pdf, filename: 'گزارش.pdf' });
+  assert.equal(parseNativeBridgeMessage(message('https://evil.example/report.pdf')), null);
+  assert.equal(parseNativeBridgeMessage(message('file:///data/report.pdf')), null);
+});

@@ -10,6 +10,7 @@ const ALLOWED_HOSTS = new Set([
 export type NativeBridgeAction =
   | { type: 'set-safe-area-background'; color: string; theme: 'light' | 'dark' }
   | { type: 'save-media'; url: string; filename?: string }
+  | { type: 'open-file'; url: string; filename?: string }
   | { type: 'share'; url: string; title?: string }
   | { type: 'copy-link'; url: string }
   | { type: 'open-browser'; url: string }
@@ -121,6 +122,8 @@ export function parseNativeBridgeMessage(value: string): NativeBridgeAction | nu
   switch (message.type) {
     case 'save-media':
       return { type: 'save-media', url: message.url, filename: optionalText(message.filename) };
+    case 'open-file':
+      return { type: 'open-file', url: message.url, filename: optionalText(message.filename) };
     case 'share':
       return { type: 'share', url: message.url, title: optionalText(message.title) };
     case 'copy-link':

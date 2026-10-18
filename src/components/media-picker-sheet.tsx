@@ -11,6 +11,7 @@ import {
   Linking,
   Modal,
   PanResponder,
+  PixelRatio,
   Pressable,
   StyleSheet,
   Text,
@@ -213,7 +214,13 @@ function MediaPickerSheet({
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const sheetHeight = Math.round(height * SHEET_RATIO);
-  const cell = (width - GAP * (COLUMNS - 1)) / COLUMNS;
+  // Whole device pixels: fractional cells round differently row by row, so
+  // the real rows would drift away from the offsets getItemLayout reports.
+  const pixels = PixelRatio.get();
+  const gap = PixelRatio.roundToNearestPixel(GAP);
+  const cell =
+    Math.floor(((width - gap * (COLUMNS - 1)) / COLUMNS) * pixels) / pixels;
+  const row = cell + gap;
 
   const [access, setAccess] = useState<GalleryAccess>("checking");
   const [canAskAgain, setCanAskAgain] = useState(true);
@@ -411,8 +418,8 @@ function MediaPickerSheet({
     const style = {
       width: cell,
       height: cell,
-      marginLeft: index % COLUMNS === COLUMNS - 1 ? 0 : GAP,
-      marginBottom: GAP,
+      marginLeft: index % COLUMNS === COLUMNS - 1 ? 0 : gap,
+      marginBottom: gap,
       backgroundColor: colors.tile,
     };
 
@@ -563,9 +570,11 @@ function MediaPickerSheet({
           numColumns={COLUMNS}
           // The grid reads right-to-left like the rest of the app.
           columnWrapperStyle={styles.row}
+          // With numColumns the list virtualizes rows, so `index` is a row
+          // index here, not a tile index.
           getItemLayout={(_, index) => ({
-            length: cell + GAP,
-            offset: (cell + GAP) * Math.floor(index / COLUMNS),
+            length: row,
+            offset: row * index,
             index,
           })}
           initialNumToRender={COLUMNS * 6}

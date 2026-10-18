@@ -34,3 +34,24 @@ export function galleryFilename(downloadedName: string, now: number): string {
   const extension = fileExtension(downloadedName) ?? 'jpg';
   return `naghshman-${now}.${extension === 'jpeg' ? 'jpg' : extension}`;
 }
+
+/**
+ * The name a downloaded attachment is opened under. The page's title (e.g.
+ * «گزارش.pdf») is what the viewer app shows, so it is kept when it is a safe
+ * file name; the extension, which decides the app that opens it, is the one
+ * the download got from its Content-Type whenever there is one.
+ */
+export function openedFilename(requested: string | undefined, downloadedName: string): string {
+  const title = (requested ?? '')
+    .replace(/[\u0000-\u001f\u007f/\\:*?"<>|]+/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim()
+    .replace(/^[.\s]+/u, '')
+    .slice(0, 120)
+    .trim();
+  if (!title) return downloadedName;
+  const downloaded = fileExtension(downloadedName);
+  // «نسخه v1.25» has no real extension; what the server sent wins.
+  if (!downloaded || fileExtension(title) === downloaded) return title;
+  return `${title}.${downloaded}`;
+}

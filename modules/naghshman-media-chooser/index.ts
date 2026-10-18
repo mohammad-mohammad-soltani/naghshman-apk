@@ -16,6 +16,10 @@ declare class NaghshmanMediaChooserModule extends NativeModule<MediaChooserEvent
   resolve(items: PickedMedia[]): void;
   cancel(): void;
   openSystemChooser(): void;
+  /** The WebView's Cookie header for `url`, or null when it has none. */
+  cookiesFor(url: string): string | null;
+  /** Opens a cached file in the app that handles its type; false when none does. */
+  openFile(path: string, mimeType?: string | null): Promise<boolean>;
 }
 
 /**
