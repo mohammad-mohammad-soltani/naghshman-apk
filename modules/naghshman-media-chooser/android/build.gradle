@@ -18,5 +18,8 @@ dependencies {
   implementation "androidx.core:core-ktx:1.17.0"
   // The app always ships react-native-webview; this module only hooks its
   // (patched) file chooser, see patches/react-native-webview+*.patch.
+  // RNCWebChromeClient implements React's LifecycleEventListener, so Kotlin
+  // needs React on the classpath to resolve the class hierarchy.
+  compileOnly 'com.facebook.react:react-android'
   compileOnly project(':react-native-webview')
 }
