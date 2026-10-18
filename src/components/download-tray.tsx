@@ -389,10 +389,14 @@ export function DownloadTray({
   onOpen,
   onClearSettled,
   onHeightChange,
+  hidden = false,
 }: {
   items: DownloadItem[];
   theme: "light" | "dark";
+  /** Distance from the screen's bottom; the card springs to follow it. */
   bottom: number;
+  /** Steps aside (downloads keep running), e.g. for the site's audio player. */
+  hidden?: boolean;
   onCancel: (id: string) => void;
   onRetry: (item: DownloadItem) => void;
   onOpen: (item: DownloadItem) => void;
@@ -407,7 +411,8 @@ export function DownloadTray({
   const [presence] = useState(() => new Animated.Value(0));
   const [scrim] = useState(() => new Animated.Value(0));
   const [chevron] = useState(() => new Animated.Value(0));
-  const visible = items.length > 0;
+  const [lift] = useState(() => new Animated.Value(bottom));
+  const visible = items.length > 0 && !hidden;
   const summary = summarizeDownloads(items);
 
   if (visible && shown !== items) setShown(items);
@@ -445,7 +450,18 @@ export function DownloadTray({
     }).start();
   }, [chevron, expanded, scrim]);
 
-  const settled = visible && summary.active === 0;
+  // Follows the site's bottom navigation as it slides in and out.
+  useEffect(() => {
+    Animated.spring(lift, {
+      toValue: bottom,
+      damping: 22,
+      stiffness: 240,
+      mass: 0.9,
+      useNativeDriver: true,
+    }).start();
+  }, [bottom, lift]);
+
+  const settled = items.length > 0 && summary.active === 0;
   useEffect(() => {
     if (!settled || expanded) return;
     const timer = setTimeout(onClearSettled, AUTO_HIDE_MS);
@@ -486,16 +502,18 @@ export function DownloadTray({
         style={[
           styles.card,
           {
-            bottom,
             backgroundColor: colors.card,
             borderColor: colors.border,
             opacity: presence,
             transform: [
               {
-                translateY: presence.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [28, 0],
-                }),
+                translateY: Animated.add(
+                  Animated.multiply(lift, -1),
+                  presence.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [28, 0],
+                  }),
+                ),
               },
               {
                 scale: presence.interpolate({
@@ -750,6 +768,7 @@ function OpenIcon({ color }: { color: string }) {
 const styles = StyleSheet.create({
   card: {
     position: "absolute",
+    bottom: 0,
     left: 12,
     right: 12,
     borderRadius: 22,

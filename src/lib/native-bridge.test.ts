@@ -131,3 +131,50 @@ test('opens an attachment only from the site or its media hosts', () => {
   assert.equal(parseNativeBridgeMessage(message('https://evil.example/report.pdf')), null);
   assert.equal(parseNativeBridgeMessage(message('file:///data/report.pdf')), null);
 });
+
+test('reports where the site\'s bottom bars sit, within sane bounds', () => {
+  const layout = (fields: Record<string, unknown>) =>
+    parseNativeBridgeMessage(JSON.stringify({ source: 'naghshman-web', version: 1, type: 'floating-layout', ...fields }));
+
+  assert.deepEqual(layout({ navHeight: 64, audioTop: null }), { type: 'floating-layout', navHeight: 64, audioTop: null });
+  assert.deepEqual(layout({ navHeight: 0, audioTop: 150 }), { type: 'floating-layout', navHeight: 0, audioTop: 150 });
+  assert.equal(layout({ navHeight: 'tall', audioTop: null }), null);
+  assert.equal(layout({ navHeight: 64, audioTop: 'top' }), null);
+});
+
+test('hands the app\'s player only an HTTPS track, with the avatar as its cover', () => {
+  const load = (track: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+    parseNativeBridgeMessage(JSON.stringify({ source: 'naghshman-web', version: 1, type: 'native-audio-load', track, ...extra }));
+
+  assert.deepEqual(
+    load(
+      {
+        id: 'ava:12',
+        title: 'گفتگوی هفته',
+        artist: 'میدان',
+        url: 'https://cdn.example.com/a.mp3',
+        artistAvatar: 'https://naghshman.ir/avatar.jpg',
+        cover: 'https://naghshman.ir/cover.jpg',
+      },
+      { position: 42.5, autoplay: false },
+    ),
+    {
+      type: 'native-audio-load',
+      track: {
+        id: 'ava:12',
+        title: 'گفتگوی هفته',
+        artist: 'میدان',
+        url: 'https://cdn.example.com/a.mp3',
+        artwork: 'https://naghshman.ir/avatar.jpg',
+      },
+      position: 42.5,
+      autoplay: false,
+    },
+  );
+  assert.equal(load({ id: 'a', title: 'x', url: 'http://cdn.example.com/a.mp3' }), null);
+  assert.equal(load({ id: 'a b<script>', title: 'x', url: 'https://cdn.example.com/a.mp3' }), null);
+  assert.deepEqual(
+    parseNativeBridgeMessage(JSON.stringify({ source: 'naghshman-web', version: 1, type: 'native-audio-seek', seconds: 12 })),
+    { type: 'native-audio-seek', seconds: 12 },
+  );
+});

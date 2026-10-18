@@ -106,6 +106,13 @@
       ],
       "expo-web-browser",
       [
+        "expo-audio",
+        {
+          "enableBackgroundPlayback": true,
+          "microphonePermission": "نقش من برای ضبط و ارسال پیام صوتی به میکروفون دسترسی می‌خواهد."
+        }
+      ],
+      [
         "expo-notifications",
         {
           "icon": "./assets/images/meydan-icon-foreground.png",

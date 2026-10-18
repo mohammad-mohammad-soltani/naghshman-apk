@@ -16,7 +16,23 @@ export type NativeBridgeAction =
   | { type: 'open-browser'; url: string }
   | { type: 'persist-refresh'; token: string }
   | { type: 'clear-refresh' }
-  | { type: 'ensure-media-permission'; requestId: string; kinds: MediaPermissionKind[] };
+  | { type: 'ensure-media-permission'; requestId: string; kinds: MediaPermissionKind[] }
+  | { type: 'floating-layout'; navHeight: number; audioTop: number | null }
+  | { type: 'native-audio-load'; track: NativeAudioTrack; position: number; autoplay: boolean }
+  | { type: 'native-audio-play' }
+  | { type: 'native-audio-pause' }
+  | { type: 'native-audio-seek'; seconds: number }
+  | { type: 'native-audio-clear' };
+
+/** A track the site hands to the app's own player. */
+export type NativeAudioTrack = {
+  id: string;
+  title: string;
+  artist?: string;
+  url: string;
+  /** Shown as the cover in the system's media controls. */
+  artwork?: string;
+};
 
 export type MediaPermissionKind = 'microphone' | 'camera';
 const MEDIA_PERMISSION_KINDS: readonly MediaPermissionKind[] = ['microphone', 'camera'];
@@ -27,6 +43,12 @@ const MEDIA_HOSTS = new Set(['naghshman-media.s3.ir-thr-at1.arvanstorage.ir']);
 const MEDIA_DOMAIN_SUFFIXES = ['naghshman.ir', 'nabzjahan.ir'];
 
 type BridgeEnvelope = {
+  navHeight?: unknown;
+  audioTop?: unknown;
+  track?: unknown;
+  position?: unknown;
+  autoplay?: unknown;
+  seconds?: unknown;
   source?: unknown;
   version?: unknown;
   type?: unknown;
@@ -63,6 +85,36 @@ export function isAllowedMediaUrl(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+function isHttpsUrl(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  try {
+    return new URL(value).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+/** A finite CSS pixel distance, clamped to what a phone screen can hold. */
+function layoutDistance(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.min(Math.max(value, 0), 2000) : null;
+}
+
+function parseAudioTrack(value: unknown): NativeAudioTrack | null {
+  if (!value || typeof value !== 'object') return null;
+  const track = value as Record<string, unknown>;
+  if (typeof track.id !== 'string' || !/^[\w:.-]{1,128}$/u.test(track.id)) return null;
+  // Podcasts stream from their own hosts, so any HTTPS audio may play.
+  if (!isHttpsUrl(track.url)) return null;
+  const artwork = [track.artwork, track.artistAvatar, track.cover].find(isHttpsUrl);
+  return {
+    id: track.id,
+    title: optionalText(track.title) ?? 'صوت',
+    artist: optionalText(track.artist),
+    url: track.url,
+    ...(artwork ? { artwork } : {}),
+  };
 }
 
 function optionalText(value: unknown): string | undefined {
@@ -115,6 +167,37 @@ export function parseNativeBridgeMessage(value: string): NativeBridgeAction | nu
     return typeof message.token === 'string' && /^ref_[A-Za-z0-9_-]{20,512}$/.test(message.token)
       ? { type: 'persist-refresh', token: message.token }
       : null;
+  }
+
+  if (message.type === 'floating-layout') {
+    const navHeight = layoutDistance(message.navHeight);
+    const audioTop = message.audioTop === null ? null : layoutDistance(message.audioTop);
+    if (navHeight === null || (message.audioTop !== null && audioTop === null)) return null;
+    return { type: 'floating-layout', navHeight, audioTop };
+  }
+
+  switch (message.type) {
+    case 'native-audio-load': {
+      const track = parseAudioTrack(message.track);
+      if (!track) return null;
+      return {
+        type: 'native-audio-load',
+        track,
+        position:
+          typeof message.position === 'number' && Number.isFinite(message.position)
+            ? Math.max(0, message.position)
+            : 0,
+        autoplay: message.autoplay !== false,
+      };
+    }
+    case 'native-audio-play':
+    case 'native-audio-pause':
+    case 'native-audio-clear':
+      return { type: message.type };
+    case 'native-audio-seek':
+      return typeof message.seconds === 'number' && Number.isFinite(message.seconds)
+        ? { type: 'native-audio-seek', seconds: Math.max(0, message.seconds) }
+        : null;
   }
 
   if (typeof message.url !== 'string' || !isAllowedMediaUrl(message.url)) return null;

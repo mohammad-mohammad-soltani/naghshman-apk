@@ -37,6 +37,7 @@ function mountShell() {
     '@/components/permission-sheet': { useMediaPermissions: () => ({ ensure: async () => true, sheet: null }) },
     '@/components/app-toast': { AppToast: 'AppToast' },
     '@/components/download-tray': { DownloadTray: 'DownloadTray' },
+    '@/components/use-native-audio': { useNativeAudio: () => ({ handle: async () => {}, resetForNewDocument() {} }) },
     '@/components/use-downloads': {
       useDownloads: () => ({ items: [], openFile: async () => {}, saveMedia: async () => {}, cancel() {}, retry() {}, open() {}, clearSettled() {} }),
     },

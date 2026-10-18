@@ -34,6 +34,7 @@ import { LaunchSplash } from "@/components/launch-splash";
 import { MediaPickerHost } from "@/components/media-picker-sheet";
 import { useMediaPermissions } from "@/components/permission-sheet";
 import { useDownloads, type NoticeTone } from "@/components/use-downloads";
+import { useNativeAudio } from "@/components/use-native-audio";
 import { useKeyboardInset } from "@/components/use-keyboard-inset";
 import { WebLoadError } from "@/components/web-load-error";
 import {
@@ -94,8 +95,13 @@ import * as SplashScreen from "expo-splash-screen";
 const APP_URL = "https://naghshman.ir";
 const REFRESH_TOKEN_KEY = "naghshman.refresh-token";
 const BRAND_BACKGROUND = "#dc2626";
-// The site's bottom navigation is 64px tall; floating cards sit just above it.
-const FLOATING_CLEARANCE = 76;
+// Room between the app's floating cards and whatever they sit on.
+const FLOATING_GAP = 12;
+// Until the page reports its layout, assume the site's 64px bottom navigation.
+const INITIAL_FLOATING_LAYOUT = {
+  navHeight: 64,
+  audioTop: null as number | null,
+};
 const OFFLINE_NOTICE = "اینترنت قطع است؛ دوباره تلاش می‌کنیم.";
 const RETRYING_NOTICE = "ارتباط برقرار نشد؛ دوباره تلاش می‌کنیم.";
 /** The Android versionCode of this install; null in dev runtimes and on iOS. */
@@ -155,7 +161,9 @@ function nativeBootstrap(
       window.NaghshmanNative = Object.freeze({
         platform: '${platform}',
         version: 1,
-        features: Object.freeze(${JSON.stringify(nativeFeatures(platform))})
+        features: Object.freeze(${JSON.stringify(nativeFeatures(platform))}),
+        // The site hands its audio to the app's player (see use-native-audio).
+        capabilities: Object.freeze({ nativeAudioV1: true })
       });
     var post = function (payload) {
       if (window.ReactNativeWebView && typeof window.ReactNativeWebView.postMessage === 'function') {
@@ -270,6 +278,55 @@ function nativeBootstrap(
     window.addEventListener('resize', pinAppShell);
     if (window.visualViewport) window.visualViewport.addEventListener('resize', pinAppShell);
     window.addEventListener('scroll', pinAppShell, { passive: true });
+    // Tells the app where the site's bottom bars will be, so its floating
+    // cards sit above them. The nav slides away while scrolling down
+    // (data-scroll-down on the shell), so its target state is reported rather
+    // than its mid-animation position, and the app animates alongside.
+    var lastLayout = '';
+    var layoutFrame = 0;
+    var reportLayout = function () {
+      layoutFrame = 0;
+      var viewport = window.innerHeight || 0;
+      var nav = document.getElementById('bottomNavBar');
+      var shell = nav && nav.closest('[data-scroll-down]');
+      var scrolledAway = Boolean(shell && shell.getAttribute('data-scroll-down') === 'true');
+      var navShown = Boolean(nav && nav.offsetHeight > 0 && window.getComputedStyle(nav).display !== 'none');
+      var navHeight = navShown ? nav.offsetHeight : 0;
+      var player = document.querySelector('[aria-label="پخش‌کننده صوت"]');
+      var audioTop = null;
+      if (player && player.offsetHeight > 0) {
+        // Its untransformed top, then where the scroll-away shift will leave it.
+        var rect = player.getBoundingClientRect();
+        var shift = new DOMMatrixReadOnly(window.getComputedStyle(player).transform).m42 || 0;
+        var top = rect.top - shift + (scrolledAway && navShown ? navHeight : 0);
+        audioTop = Math.max(0, Math.round(viewport - top));
+      }
+      var layout = {
+        type: 'floating-layout',
+        navHeight: scrolledAway ? 0 : navHeight,
+        audioTop: audioTop
+      };
+      var key = layout.navHeight + ':' + layout.audioTop;
+      if (key === lastLayout) return;
+      lastLayout = key;
+      post(layout);
+    };
+    var scheduleLayout = function () {
+      if (!layoutFrame) layoutFrame = window.requestAnimationFrame(reportLayout);
+    };
+    var watchLayout = function () {
+      new MutationObserver(scheduleLayout).observe(document.documentElement, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        // Not 'style': progress bars rewrite theirs many times a second.
+        attributeFilter: ['data-scroll-down', 'data-naghshman-native-guest', 'class']
+      });
+      window.addEventListener('resize', scheduleLayout);
+      scheduleLayout();
+    };
+    if (document.documentElement) watchLayout();
+    else document.addEventListener('DOMContentLoaded', watchLayout, { once: true });
     window.dispatchEvent(new Event('naghshman:native-ready'));
     }
 
@@ -1112,6 +1169,8 @@ export function NativeWebShell() {
   const downloads = useDownloads(showNotice, openExternal);
   const { openFile, saveMedia } = downloads;
   const [trayHeight, setTrayHeight] = useState(0);
+  const [floatingLayout, setFloatingLayout] = useState(INITIAL_FLOATING_LAYOUT);
+  const nativeAudio = useNativeAudio(webViewRef);
 
   const handleMessage = useCallback(
     async (event: WebViewMessageEvent) => {
@@ -1131,6 +1190,21 @@ export function NativeWebShell() {
           break;
         case "open-file":
           await openFile(action.url, action.filename);
+          break;
+        case "floating-layout":
+          setFloatingLayout((current) =>
+            current.navHeight === action.navHeight &&
+            current.audioTop === action.audioTop
+              ? current
+              : { navHeight: action.navHeight, audioTop: action.audioTop },
+          );
+          break;
+        case "native-audio-load":
+        case "native-audio-play":
+        case "native-audio-pause":
+        case "native-audio-seek":
+        case "native-audio-clear":
+          await nativeAudio.handle(action);
           break;
         case "share":
           await Share.share({ message: action.url, title: action.title });
@@ -1186,6 +1260,7 @@ export function NativeWebShell() {
     },
     [
       ensureMediaPermissions,
+      nativeAudio,
       nativePlatform,
       openFile,
       saveMedia,
@@ -1247,12 +1322,14 @@ export function NativeWebShell() {
     (event: { nativeEvent: { url: string } }) => {
       if (!isInitialWebDocument(event.nativeEvent.url)) return;
       mainDocumentUrl.current = event.nativeEvent.url;
+      nativeAudio.resetForNewDocument();
+      setFloatingLayout(INITIAL_FLOATING_LAYOUT);
       setLoading(true);
       webViewDocumentReady.current = false;
       completedDocumentUrl.current = null;
       initialAttemptHadError.current = false;
     },
-    [],
+    [nativeAudio],
   );
 
   const handleLoad = useCallback(
@@ -1410,10 +1487,17 @@ export function NativeWebShell() {
 
   const floatingTheme = lightWebTheme ? "light" : "dark";
   // Floating cards clear the site's bottom navigation, or sit on the keyboard.
-  const floatingBottom =
-    keyboardInset > 0
-      ? keyboardInset + insets.bottom + 12
-      : insets.bottom + FLOATING_CLEARANCE;
+  // Floating cards sit on the site's bottom navigation, or at the bottom of
+  // the page while it is scrolled away or absent, and above the keyboard.
+  const floatingBase = insets.bottom + keyboardInset;
+  const trayBottom = floatingBase + floatingLayout.navHeight + FLOATING_GAP;
+  // The site's audio player takes the same spot; it wins and the tray waits.
+  const audioPlayerShown = floatingLayout.audioTop !== null;
+  const toastBottom =
+    floatingBase +
+    Math.max(floatingLayout.navHeight, floatingLayout.audioTop ?? 0) +
+    FLOATING_GAP +
+    (!audioPlayerShown && trayHeight ? trayHeight + 10 : 0);
 
   const recovery = (
     <WebLoadError
@@ -1534,18 +1618,15 @@ export function NativeWebShell() {
       <DownloadTray
         items={downloads.items}
         theme={floatingTheme}
-        bottom={floatingBottom}
+        bottom={trayBottom}
+        hidden={audioPlayerShown}
         onCancel={downloads.cancel}
         onRetry={downloads.retry}
         onOpen={downloads.open}
         onClearSettled={downloads.clearSettled}
         onHeightChange={setTrayHeight}
       />
-      <AppToast
-        notice={notice}
-        theme={floatingTheme}
-        bottom={floatingBottom + (trayHeight ? trayHeight + 10 : 0)}
-      />
+      <AppToast notice={notice} theme={floatingTheme} bottom={toastBottom} />
       {Platform.OS === "android" && MediaChooser ? (
         <MediaPickerHost theme={chromeTheme} onNotice={showNotice} />
       ) : null}
