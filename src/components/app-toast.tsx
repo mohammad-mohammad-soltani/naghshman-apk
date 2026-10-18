@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Animated, Easing, StyleSheet, Text, View } from "react-native";
 import Svg, { Path } from "react-native-svg";
 
-import { CheckIcon, SURFACE } from "@/components/download-tray";
+import { CheckIcon, SITE_FONT, SURFACE } from "@/components/download-tray";
 import type { NoticeTone } from "@/components/use-downloads";
 
 export type Notice = { id: number; message: string; tone: NoticeTone };
@@ -139,8 +139,9 @@ const styles = StyleSheet.create({
   },
   text: {
     flex: 1,
-    fontFamily: "Yekan",
-    fontSize: 14,
+    fontFamily: SITE_FONT,
+    fontWeight: "500",
+    fontSize: 13.5,
     lineHeight: 22,
     textAlign: "right",
     writingDirection: "rtl",

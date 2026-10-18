@@ -73,7 +73,26 @@
         {
           "fonts": [
             "./assets/fonts/Yekan.ttf"
-          ]
+          ],
+          "android": {
+            "fonts": [
+              {
+                "fontFamily": "IRANSansX",
+                "fontDefinitions": [
+                  { "path": "./assets/fonts/IRANSansX-Regular.ttf", "weight": 400 },
+                  { "path": "./assets/fonts/IRANSansX-Medium.ttf", "weight": 500 },
+                  { "path": "./assets/fonts/IRANSansX-Bold.ttf", "weight": 700 }
+                ]
+              }
+            ]
+          },
+          "ios": {
+            "fonts": [
+              "./assets/fonts/IRANSansX-Regular.ttf",
+              "./assets/fonts/IRANSansX-Medium.ttf",
+              "./assets/fonts/IRANSansX-Bold.ttf"
+            ]
+          }
         }
       ],
       "expo-secure-store",

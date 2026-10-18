@@ -22,6 +22,8 @@ import {
 } from "@/lib/downloads";
 
 const BRAND = "#dc2626";
+/** The site's own typeface (IRANSansX), bundled with the app's fonts. */
+export const SITE_FONT = "IRANSansX";
 const SUCCESS = "#16a34a";
 // The site's popover surfaces (`--popover`), so the tray reads as part of it.
 export const SURFACE = {
@@ -774,13 +776,15 @@ const styles = StyleSheet.create({
   },
   summaryBody: { flex: 1, minWidth: 0 },
   summaryTitle: {
-    fontFamily: "Yekan",
-    fontSize: 14.5,
+    fontFamily: SITE_FONT,
+    fontWeight: "700",
+    fontSize: 14,
     textAlign: "right",
     writingDirection: "rtl",
   },
   summarySubtitle: {
-    fontFamily: "Yekan",
+    fontFamily: SITE_FONT,
+    fontWeight: "400",
     fontSize: 12,
     marginTop: 1,
     textAlign: "right",
@@ -792,8 +796,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  ringCount: { fontFamily: "Yekan", fontSize: 15 },
-  ringMark: { fontFamily: "Yekan", fontSize: 18 },
+  ringCount: { fontFamily: SITE_FONT, fontWeight: "700", fontSize: 15 },
+  ringMark: { fontFamily: SITE_FONT, fontWeight: "700", fontSize: 18 },
   edge: { position: "absolute", left: 0, right: 0, bottom: 0 },
   chevron: {
     width: 32,
@@ -810,7 +814,7 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   sheetTitleRow: { flexDirection: "row-reverse", alignItems: "center", gap: 8 },
-  sheetTitle: { fontFamily: "Yekan", fontSize: 16 },
+  sheetTitle: { fontFamily: SITE_FONT, fontWeight: "700", fontSize: 16 },
   countPill: {
     minWidth: 24,
     height: 22,
@@ -819,10 +823,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  countText: { fontFamily: "Yekan", fontSize: 12 },
+  countText: { fontFamily: SITE_FONT, fontWeight: "500", fontSize: 12 },
   sheetActions: { flexDirection: "row", alignItems: "center", gap: 6 },
   clear: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 5 },
-  clearText: { fontFamily: "Yekan", fontSize: 12.5 },
+  clearText: { fontFamily: SITE_FONT, fontWeight: "500", fontSize: 12.5 },
   list: { maxHeight: 330 },
   listContent: { paddingBottom: 8 },
   divider: {
@@ -851,7 +855,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 3,
   },
-  badgeText: { fontFamily: "Yekan", fontSize: 11.5 },
+  badgeText: { fontFamily: SITE_FONT, fontWeight: "700", fontSize: 11.5 },
   badgeCheck: {
     position: "absolute",
     bottom: -3,
@@ -866,13 +870,15 @@ const styles = StyleSheet.create({
   },
   rowBody: { flex: 1, minWidth: 0 },
   rowName: {
-    fontFamily: "Yekan",
+    fontFamily: SITE_FONT,
+    fontWeight: "700",
     fontSize: 14,
     textAlign: "right",
     writingDirection: "rtl",
   },
   rowDetail: {
-    fontFamily: "Yekan",
+    fontFamily: SITE_FONT,
+    fontWeight: "400",
     fontSize: 11.5,
     marginTop: 1,
     textAlign: "right",
