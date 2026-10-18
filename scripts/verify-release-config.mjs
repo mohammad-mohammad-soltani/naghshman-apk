@@ -11,20 +11,21 @@ test('configures the Meydan launcher and splash assets', () => {
   assert.equal(app.icon, './assets/images/meydan-icon.png');
   assert.equal(app.android.adaptiveIcon.foregroundImage, './assets/images/meydan-icon-foreground.png');
   assert.equal(app.android.adaptiveIcon.backgroundColor, '#dc2626');
-  assert.equal(app.backgroundColor, '#dc2626');
+  assert.equal(app.backgroundColor, '#ffffff');
   assert.equal(app.primaryColor, '#dc2626');
 
   const splashPlugin = app.plugins.find(
     (plugin) => Array.isArray(plugin) && plugin[0] === 'expo-splash-screen',
   )?.[1];
-  assert.equal(splashPlugin.backgroundColor, '#c03636');
-  assert.equal(splashPlugin.image, './assets/images/native-splash-map.png');
+  assert.equal(splashPlugin.backgroundColor, '#ffffff');
+  assert.equal(splashPlugin.dark.backgroundColor, '#000000');
+  assert.equal(splashPlugin.image, undefined);
 
   for (const path of [
     '../assets/images/meydan-icon.png',
     '../assets/images/meydan-icon-foreground.png',
-    '../assets/images/splash-dotless.jpg',
-    '../assets/images/native-splash-map.png',
+    '../assets/splash/splash-light.json',
+    '../assets/splash/splash-dark.json',
   ]) {
     assert.equal(existsSync(new URL(path, import.meta.url)), true, `${path} must exist`);
   }

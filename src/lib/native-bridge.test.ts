@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  isAllowedMediaUrl,
   isAllowedWebUrl,
   parseNativeBridgeMessage,
 } from './native-bridge.ts';
@@ -85,5 +86,18 @@ test('rejects forged, malformed, and unsafe bridge requests', () => {
       url: 'https://evil.example/a.jpg',
     })),
     null,
+  );
+});
+
+test('accepts object-storage media for gallery actions but never for navigation', () => {
+  const arvan = 'https://naghshman-media.s3.ir-thr-at1.arvanstorage.ir/production/users/42/photo.jpg';
+  assert.equal(isAllowedWebUrl(arvan), false);
+  assert.equal(isAllowedMediaUrl(arvan), true);
+  assert.equal(isAllowedMediaUrl('https://cdn.nabzjahan.ir/wp-content/uploads/a.jpg'), true);
+  assert.equal(isAllowedMediaUrl('https://evil-arvanstorage.ir/production/a.jpg'), false);
+  assert.equal(isAllowedMediaUrl('http://naghshman.ir/a.jpg'), false);
+  assert.deepEqual(
+    parseNativeBridgeMessage(JSON.stringify({ source: 'naghshman-web', version: 1, type: 'save-media', url: arvan })),
+    { type: 'save-media', url: arvan, filename: undefined },
   );
 });

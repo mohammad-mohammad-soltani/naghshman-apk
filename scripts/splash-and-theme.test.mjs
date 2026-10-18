@@ -30,9 +30,11 @@ test('light theme starts white and theme changes explicitly resync native system
 });
 
 
-test('splash keeps the system chrome on the brand red independently of light web theme', () => {
+test('splash keeps the system chrome on the white or black splash background', () => {
   const source = readFileSync(new URL('src/components/native-web-shell.tsx', root), 'utf8');
-  assert.match(source, /const systemChromeBackground = splashOverlayMounted[\s\S]*\? LAUNCH_BACKGROUND[\s\S]*: safeAreaBackground/);
+  assert.match(source, /const systemChromeBackground = splashOverlayMounted[\s\S]*\? splashBackground[\s\S]*: safeAreaBackground/);
+  assert.match(source, /const splashBackground = SPLASH_BACKGROUND\[splashTheme\]/);
+  assert.doesNotMatch(source, /#c03636|LAUNCH_BACKGROUND/);
   assert.match(source, /backgroundColor=\{systemChromeBackground\}/);
   assert.match(source, /styles\.safeArea, \{ backgroundColor: systemChromeBackground \}/);
 });
@@ -55,23 +57,21 @@ test('native shell enables hardware rendering and strips the expensive blur anim
 });
 
 
-test('releases the OS splash from the React overlay layout without waiting for SVG image load', () => {
+test('releases the OS splash from the React overlay layout without waiting for the animation', () => {
   const source = readFileSync(new URL('src/components/launch-splash.tsx', root), 'utf8');
   assert.match(source, /onLayout=\{\(\{ nativeEvent \}\) => \{/);
-  assert.match(source, /if \(width > 0\)[\s\S]*onReady\(\)/);
-  assert.doesNotMatch(source, /onLoad=\{handleArtworkLoaded\}/);
-  assert.doesNotMatch(source, /artworkLoaded/);
+  assert.match(source, /if \(nativeEvent\.layout\.width > 0\) onReady\(\)/);
   assert.doesNotMatch(source, /isNativeSplashReady/);
 });
 
 
-test('keeps the SVG splash visible for at least two seconds while the WebView warms visible media', () => {
+test('plays the Lottie splash through once (capped) while the WebView warms visible media', () => {
   const source = readFileSync(new URL('src/components/native-web-shell.tsx', root), 'utf8');
 
-  assert.match(source, /const MIN_CUSTOM_SPLASH_MS = 2000/);
-  assert.match(source, /if \(!nativeSplashReleased \|\| minimumCustomSplashElapsed\) return/);
-  assert.match(source, /setTimeout\(\(\) => \{[\s\S]*setMinimumCustomSplashElapsed\(true\)[\s\S]*MIN_CUSTOM_SPLASH_MS/);
-  assert.match(source, /isLaunchSplashVisible\([\s\S]*minimumCustomSplashElapsed/);
+  assert.match(source, /if \(!nativeSplashReleased \|\| splashAnimationFinished\) return/);
+  assert.match(source, /setTimeout\(\(\) => \{[\s\S]*setSplashAnimationFinished\(true\)[\s\S]*SPLASH_ANIMATION_CAP_MS/);
+  assert.match(source, /isLaunchSplashVisible\([\s\S]*splashAnimationFinished,[\s\S]*launchOffline/);
+  assert.match(source, /onAnimationFinish=\{handleSplashAnimationFinish\}/);
 
   assert.match(source, /__naghshmanLaunchMediaWarmup/);
   assert.match(source, /image\.loading = 'eager'/);
@@ -79,4 +79,13 @@ test('keeps the SVG splash visible for at least two seconds while the WebView wa
   assert.match(source, /video\.preload = 'auto'/);
   assert.match(source, /warmedImages >= 8/);
   assert.match(source, /warmedVideos >= 2/);
+});
+
+
+test('never opens the WebView before the launch probe reached the site', () => {
+  const source = readFileSync(new URL('src/components/native-web-shell.tsx', root), 'utf8');
+  assert.match(source, /nativeAuthStateResolved && initialWebUrl && launchGate\.status === "online" \?/);
+  assert.match(source, /checkForSplashUpdate\(APP_URL, splashTheme, controller\.signal\)/);
+  assert.match(source, /setTimeout\(\(\) => controller\.abort\(\), LAUNCH_PROBE_TIMEOUT_MS\)/);
+  assert.match(source, /if \(nativePlatform\) saveSplashTheme\(action\.theme\)/);
 });

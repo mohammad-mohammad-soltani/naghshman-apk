@@ -9,7 +9,7 @@ test('keeps the launch splash visible until the first document is ready', () => 
   assert.equal(isLaunchSplashVisible(true, true, true), false);
 });
 
-test('keeps the custom SVG splash visible for its minimum display window', () => {
+test('lets the Lottie splash play through before fading away', () => {
   assert.equal(isLaunchSplashVisible(true, true, false), true);
   assert.equal(isLaunchSplashVisible(true, true, true), false);
 });
@@ -17,6 +17,11 @@ test('keeps the custom SVG splash visible for its minimum display window', () =>
 test('does not fade away until the native-to-custom splash handoff resolves', () => {
   assert.equal(isLaunchSplashVisible(true, false, true), true);
   assert.equal(isLaunchSplashVisible(true, true, true), false);
+});
+
+test('stays on the splash while the launch is offline', () => {
+  assert.equal(isLaunchSplashVisible(true, true, true, true), true);
+  assert.equal(isLaunchSplashVisible(true, true, true, false), false);
 });
 
 test('never reopens the launch splash on later navigation or load failure once all launch gates passed', () => {

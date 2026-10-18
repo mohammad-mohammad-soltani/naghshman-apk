@@ -5,10 +5,10 @@
     "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/meydan-icon.png",
-    "backgroundColor": "#c03636",
+    "backgroundColor": "#ffffff",
     "primaryColor": "#dc2626",
     "scheme": "naghshman",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/images/meydan-icon.png"
     },
@@ -20,8 +20,8 @@
       "predictiveBackGestureEnabled": false,
       "package": "ir.naghshman.app",
       "versionCode": 2,
-      "backgroundColor": "#c03636",
-      "userInterfaceStyle": "light"
+      "backgroundColor": "#ffffff",
+      "userInterfaceStyle": "automatic"
     },
     "web": {
       "output": "static",
@@ -40,10 +40,10 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#c03636",
-          "image": "./assets/images/native-floral-mark.png",
-          "imageWidth": 260,
-          "resizeMode": "contain"
+          "backgroundColor": "#ffffff",
+          "dark": {
+            "backgroundColor": "#000000"
+          }
         }
       ],
       [
@@ -76,6 +76,7 @@
       [
         "expo-notifications",
         {
+          "icon": "./assets/images/meydan-icon-foreground.png",
           "color": "#dc2626",
           "defaultChannel": "default"
         }

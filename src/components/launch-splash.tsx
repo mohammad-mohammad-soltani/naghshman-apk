@@ -1,201 +1,439 @@
-import { useEffect, useState } from "react";
+import LottieView, { type AnimationObject } from "lottie-react-native";
+import { useEffect, useMemo, useState } from "react";
 import {
   AccessibilityInfo,
+  ActivityIndicator,
   Animated,
+  Easing,
+  Pressable,
   StyleSheet,
+  Text,
   View,
 } from "react-native";
-import Svg, { Image as SvgImage, SvgXml } from "react-native-svg";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Svg, { Path } from "react-native-svg";
 
-import artwork from "../../assets/images/massage.generated.json";
+import { SPLASH_BACKGROUND, type SplashTheme } from "@/lib/splash-cache";
+import { readCachedSplash } from "@/lib/splash-store";
 
-import {
-  RIGHT_TO_LEFT_DOT_ORDER,
-  STATIC_REDUCED_MOTION_OPACITIES,
-} from "@/lib/launch-splash-timing";
+// The same light/dark animations the site plays, bundled for the very first
+// launch and for launches without a reachable site. A newer copy downloaded
+// from the site (see splash-store) takes precedence once it exists.
+const BUNDLED_SPLASH: Record<SplashTheme, Record<string, unknown>> = {
+  light: require("../../assets/splash/splash-light.json"),
+  dark: require("../../assets/splash/splash-dark.json"),
+};
 
-const DOT_IDLE_OPACITY = 0.4;
-const FADE_DURATION_MS = 260;
-const ARTWORK_BACKGROUND = "#c03636";
+/** Matches the site's splash fade-out (`FADE_OUT_MS` in meydan's SplashScreen). */
+const FADE_OUT_MS = 450;
+const BRAND = "#dc2626";
 
-const ARTWORK_WIDTH = 880;
-const ARTWORK_HEIGHT = 1912;
-
-const DOTS_X = 380;
-const DOTS_Y = 1768;
-const DOT_SIZE = 24;
-const DOT_GAP = 17;
+const PALETTE = {
+  light: {
+    card: "rgba(255, 255, 255, 0.96)",
+    border: "#f0e6e4",
+    title: "#1c1917",
+    message: "#57534e",
+    iconBackground: "#fde8e8",
+    shadow: "#7f1d1d",
+  },
+  dark: {
+    card: "rgba(23, 23, 23, 0.96)",
+    border: "#2a2a2a",
+    title: "#fafaf9",
+    message: "#a8a29e",
+    iconBackground: "#3a1515",
+    shadow: "#000000",
+  },
+} as const;
 
 type LaunchSplashProps = {
   visible: boolean;
+  theme: SplashTheme;
+  /** Hold the final frame, show the offline card and keep the art alive. */
+  offline: boolean;
+  retrying: boolean;
+  onRetry: () => void;
+  /** The overlay is laid out, so the OS splash beneath it may be released. */
   onReady: () => void;
+  onAnimationFinish: () => void;
   onHidden?: () => void;
 };
 
 export function LaunchSplash({
   visible,
+  theme,
+  offline,
+  retrying,
+  onRetry,
   onReady,
+  onAnimationFinish,
   onHidden,
 }: LaunchSplashProps) {
-  const [dotOpacities] = useState(() => [
-    new Animated.Value(DOT_IDLE_OPACITY),
-    new Animated.Value(DOT_IDLE_OPACITY),
-    new Animated.Value(DOT_IDLE_OPACITY),
-  ]);
+  const insets = useSafeAreaInsets();
+  // Both sources passed `isValidLottie` (the bundled ones are the site's own).
+  const source = useMemo(
+    () =>
+      (readCachedSplash(theme) ?? BUNDLED_SPLASH[theme]) as unknown as AnimationObject,
+    [theme],
+  );
+  const reducedMotion = useReducedMotion();
+  const [faded, setFaded] = useState(!visible);
+  const [animationDone, setAnimationDone] = useState(false);
+  const [fade] = useState(() => new Animated.Value(1));
+  const background = SPLASH_BACKGROUND[theme];
 
-  const [screenWidth, setScreenWidth] = useState(0);
+  // Shown again (only in theory): undo the fade before painting.
+  if (visible && faded) setFaded(false);
 
-  /**
-   * انیمیشن سه نقطه
-   */
+  // Fade and settle out like the site, instead of a hard cut to the WebView.
   useEffect(() => {
-    if (!visible) return;
+    if (visible) {
+      fade.setValue(1);
+      return;
+    }
+    const animation = Animated.timing(fade, {
+      toValue: 0,
+      duration: FADE_OUT_MS,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    });
+    animation.start(({ finished }) => {
+      if (!finished) return;
+      setFaded(true);
+      onHidden?.();
+    });
+    return () => animation.stop();
+  }, [fade, onHidden, visible]);
 
+  // The offline card waits for the animation to land on its final frame.
+  const showOffline = offline && animationDone;
+
+  if (!visible && faded) return null;
+
+  return (
+    <Animated.View
+      accessible={!showOffline}
+      accessibilityLabel="در حال بارگذاری"
+      accessibilityState={{ busy: !showOffline }}
+      pointerEvents={visible ? "auto" : "none"}
+      style={[
+        styles.overlay,
+        {
+          backgroundColor: background,
+          opacity: fade,
+          transform: [
+            {
+              scale: fade.interpolate({
+                inputRange: [0, 1],
+                outputRange: [1.03, 1],
+              }),
+            },
+          ],
+        },
+      ]}
+      onLayout={({ nativeEvent }) => {
+        // The React splash is physically laid out behind the OS splash, so
+        // release it now; never wait for the animation or the network.
+        if (nativeEvent.layout.width > 0) onReady();
+      }}
+    >
+      <Wiggle active={showOffline} reducedMotion={reducedMotion}>
+        <LottieView
+          source={source}
+          autoPlay
+          loop={false}
+          resizeMode="contain"
+          renderMode="HARDWARE"
+          style={styles.animation}
+          onAnimationFinish={() => {
+            setAnimationDone(true);
+            onAnimationFinish();
+          }}
+          onAnimationFailure={() => {
+            setAnimationDone(true);
+            onAnimationFinish();
+          }}
+        />
+      </Wiggle>
+      {showOffline && (
+        <OfflineCard
+          theme={theme}
+          retrying={retrying}
+          onRetry={onRetry}
+          bottomInset={insets.bottom}
+          reducedMotion={reducedMotion}
+        />
+      )}
+    </Animated.View>
+  );
+}
+
+function useReducedMotion() {
+  const [reduced, setReduced] = useState(false);
+  useEffect(() => {
     let active = true;
-    let loop: Animated.CompositeAnimation | null = null;
+    void AccessibilityInfo.isReduceMotionEnabled().then((value) => {
+      if (active) setReduced(value);
+    });
+    const subscription = AccessibilityInfo.addEventListener(
+      "reduceMotionChanged",
+      setReduced,
+    );
+    return () => {
+      active = false;
+      subscription.remove();
+    };
+  }, []);
+  return reduced;
+}
 
-    const configureMotion = (reduced: boolean) => {
-      if (!active) return;
+const sine = Easing.inOut(Easing.sin);
 
-      loop?.stop();
+/**
+ * A gentle, living idle motion: a slow sway, an out-of-phase float and a
+ * breath. The three loops have different periods so they never line up into
+ * a mechanical, repeating beat.
+ */
+function Wiggle({
+  active,
+  reducedMotion,
+  children,
+}: {
+  active: boolean;
+  reducedMotion: boolean;
+  children: React.ReactNode;
+}) {
+  const [sway] = useState(() => new Animated.Value(0));
+  const [float] = useState(() => new Animated.Value(0));
+  const [breath] = useState(() => new Animated.Value(0));
 
-      dotOpacities.forEach((opacity, index) => {
-        opacity.setValue(
-          reduced ? STATIC_REDUCED_MOTION_OPACITIES[index] : DOT_IDLE_OPACITY,
-        );
-      });
-
-      if (reduced) return;
-
-      const pulses = RIGHT_TO_LEFT_DOT_ORDER.map((index) =>
-        Animated.sequence([
-          Animated.timing(dotOpacities[index], {
-            toValue: 1,
-            duration: FADE_DURATION_MS,
+  useEffect(() => {
+    const values = [sway, float, breath];
+    if (!active) {
+      // Settle back to rest instead of snapping out of the motion.
+      const settle = Animated.parallel(
+        values.map((value) =>
+          Animated.timing(value, {
+            toValue: 0,
+            duration: 360,
+            easing: Easing.out(Easing.quad),
             useNativeDriver: true,
           }),
-          Animated.timing(dotOpacities[index], {
-            toValue: DOT_IDLE_OPACITY,
-            duration: FADE_DURATION_MS,
+        ),
+      );
+      settle.start();
+      return () => settle.stop();
+    }
+
+    const oscillate = (value: Animated.Value, period: number) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(value, {
+            toValue: 1,
+            duration: period / 4,
+            easing: sine,
+            useNativeDriver: true,
+          }),
+          Animated.timing(value, {
+            toValue: -1,
+            duration: period / 2,
+            easing: sine,
+            useNativeDriver: true,
+          }),
+          Animated.timing(value, {
+            toValue: 0,
+            duration: period / 4,
+            easing: sine,
             useNativeDriver: true,
           }),
         ]),
       );
 
-      loop = Animated.loop(Animated.sequence(pulses));
-      loop.start();
-    };
+    const loops = reducedMotion
+      ? [oscillate(breath, 4200)]
+      : [oscillate(sway, 2600), oscillate(float, 3400), oscillate(breath, 4200)];
+    loops.forEach((loop) => loop.start());
+    return () => loops.forEach((loop) => loop.stop());
+  }, [active, breath, float, reducedMotion, sway]);
 
-    void AccessibilityInfo.isReduceMotionEnabled().then(configureMotion);
+  const style = reducedMotion
+    ? {
+        opacity: breath.interpolate({
+          inputRange: [-1, 0, 1],
+          outputRange: [0.82, 1, 0.82],
+        }),
+      }
+    : {
+        transform: [
+          {
+            translateY: float.interpolate({
+              inputRange: [-1, 1],
+              outputRange: [5, -5],
+            }),
+          },
+          {
+            rotate: sway.interpolate({
+              inputRange: [-1, 1],
+              outputRange: ["-1.6deg", "1.6deg"],
+            }),
+          },
+          {
+            scale: breath.interpolate({
+              inputRange: [-1, 0, 1],
+              outputRange: [0.99, 1, 1.02],
+            }),
+          },
+        ],
+      };
 
-    const subscription = AccessibilityInfo.addEventListener(
-      "reduceMotionChanged",
-      configureMotion,
-    );
+  return <Animated.View style={[styles.wiggle, style]}>{children}</Animated.View>;
+}
 
-    return () => {
-      active = false;
-      loop?.stop();
-      subscription.remove();
-    };
-  }, [dotOpacities, visible]);
+function OfflineCard({
+  theme,
+  retrying,
+  onRetry,
+  bottomInset,
+  reducedMotion,
+}: {
+  theme: SplashTheme;
+  retrying: boolean;
+  onRetry: () => void;
+  bottomInset: number;
+  reducedMotion: boolean;
+}) {
+  const palette = PALETTE[theme];
+  const [enter] = useState(() => new Animated.Value(0));
+  const [pulse] = useState(() => new Animated.Value(0));
 
   useEffect(() => {
-    if (!visible) {
-      onHidden?.();
-    }
-  }, [visible, onHidden]);
+    const animation = Animated.spring(enter, {
+      toValue: 1,
+      damping: 16,
+      stiffness: 140,
+      mass: 0.9,
+      useNativeDriver: true,
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [enter]);
 
-  if (!visible) {
-    return null;
-  }
-
-  /**
-   * SVG دقیقاً به اندازه عرض صفحه scale می‌شود.
-   */
-  const scale = screenWidth > 0 ? screenWidth / ARTWORK_WIDTH : 1;
-
-  const dotSize = DOT_SIZE * scale;
+  // A soft ring around the icon, like a signal that keeps searching.
+  useEffect(() => {
+    if (reducedMotion) return;
+    const loop = Animated.loop(
+      Animated.timing(pulse, {
+        toValue: 1,
+        duration: 1800,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }),
+    );
+    loop.start();
+    return () => {
+      loop.stop();
+      pulse.setValue(0);
+    };
+  }, [pulse, reducedMotion]);
 
   return (
     <Animated.View
-      accessible
-      accessibilityLabel="در حال بارگذاری"
-      accessibilityState={{ busy: true }}
-      pointerEvents="auto"
-      style={styles.overlay}
-      onLayout={({ nativeEvent }) => {
-        const width = nativeEvent.layout.width;
-
-        if (width > 0) {
-          setScreenWidth(width);
-
-          // The React splash is now physically laid out behind the OS splash.
-          // Release the native splash here instead of waiting for SvgImage.onLoad,
-          // which is not guaranteed to fire in every Android release build.
-          onReady();
-        }
-      }}
-    >
-      {screenWidth > 0 && (
-        <View
-          style={[
-            styles.artworkContainer,
+      accessibilityLiveRegion="polite"
+      style={[
+        styles.card,
+        {
+          bottom: bottomInset + 28,
+          backgroundColor: palette.card,
+          borderColor: palette.border,
+          shadowColor: palette.shadow,
+          opacity: enter,
+          transform: [
             {
-              width: screenWidth,
-              height: screenWidth * (ARTWORK_HEIGHT / ARTWORK_WIDTH),
+              translateY: enter.interpolate({
+                inputRange: [0, 1],
+                outputRange: [36, 0],
+              }),
             },
-          ]}
-        >
-          <Svg
-            width="100%"
-            height="100%"
-            viewBox={`0 0 ${ARTWORK_WIDTH} ${ARTWORK_HEIGHT}`}
-            preserveAspectRatio="xMidYMid meet"
-            style={styles.svg}
-          >
-            <SvgXml
-              xml={artwork.vectors}
-              width={ARTWORK_WIDTH}
-              height={ARTWORK_HEIGHT}
-            />
-
-            <SvgImage
-              {...artwork.image.frame}
-              href={artwork.image.uri}
-              preserveAspectRatio="xMidYMid meet"
-            />
-          </Svg>
-
-          <View
-            pointerEvents="none"
+          ],
+        },
+      ]}
+    >
+      <View style={styles.iconWrap}>
+        {!reducedMotion && (
+          <Animated.View
             style={[
-              styles.dots,
+              styles.iconRing,
               {
-                left: DOTS_X * scale,
-                top: DOTS_Y * scale,
-                gap: DOT_GAP * scale,
+                borderColor: BRAND,
+                opacity: pulse.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0.45, 0],
+                }),
+                transform: [
+                  {
+                    scale: pulse.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [1, 1.6],
+                    }),
+                  },
+                ],
               },
             ]}
-          >
-            {dotOpacities.map((opacity, index) => (
-              <Animated.View
-                key={index}
-                style={[
-                  styles.dot,
-                  {
-                    opacity,
-                    width: dotSize,
-                    height: dotSize,
-                    borderRadius: dotSize / 2,
-                  },
-                ]}
-              />
-            ))}
-          </View>
+          />
+        )}
+        <View
+          style={[styles.icon, { backgroundColor: palette.iconBackground }]}
+        >
+          <WifiOffIcon />
         </View>
-      )}
+      </View>
+      <Text
+        accessibilityRole="header"
+        style={[styles.title, { color: palette.title }]}
+      >
+        شما آفلاین هستید
+      </Text>
+      <Text style={[styles.message, { color: palette.message }]}>
+        اتصال اینترنت را بررسی کنید و دوباره تلاش کنید. به محض برقراری
+        اتصال، خودمان ادامه می‌دهیم.
+      </Text>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="تلاش مجدد"
+        accessibilityState={{ disabled: retrying, busy: retrying }}
+        disabled={retrying}
+        onPress={onRetry}
+        style={({ pressed }) => [
+          styles.button,
+          pressed && styles.buttonPressed,
+          retrying && styles.buttonBusy,
+        ]}
+      >
+        {retrying ? (
+          <View style={styles.buttonRow}>
+            <ActivityIndicator color="#ffffff" size="small" />
+            <Text style={styles.buttonText}>در حال بررسی…</Text>
+          </View>
+        ) : (
+          <Text style={styles.buttonText}>تلاش مجدد</Text>
+        )}
+      </Pressable>
     </Animated.View>
+  );
+}
+
+function WifiOffIcon() {
+  return (
+    <Svg width={28} height={28} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M2 2l20 20M8.5 16.43a5 5 0 0 1 7 0M5 12.86a10 10 0 0 1 5.17-2.69M19 12.86a10 10 0 0 0-2.03-1.53M2 8.82a15 15 0 0 1 4.18-2.65M22 8.82A15 15 0 0 0 11.29 5.03M12 20h.01"
+        stroke={BRAND}
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
   );
 }
 
@@ -206,39 +444,77 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     left: 0,
-
-    backgroundColor: ARTWORK_BACKGROUND,
-
-    alignItems: "center",
-    justifyContent: "center",
-
     overflow: "hidden",
-
     zIndex: 1000,
     elevation: 1000,
   },
-
-  artworkContainer: {
-    position: "relative",
-    alignSelf: "center",
-  },
-
-  svg: {
+  wiggle: { flex: 1 },
+  animation: { flex: 1 },
+  card: {
     position: "absolute",
-    top: 0,
-    left: 0,
-  },
-
-  dots: {
-    position: "absolute",
-
-    flexDirection: "row",
-    direction: "ltr",
-
+    left: 20,
+    right: 20,
     alignItems: "center",
+    paddingTop: 26,
+    paddingBottom: 20,
+    paddingHorizontal: 22,
+    borderRadius: 28,
+    borderWidth: StyleSheet.hairlineWidth,
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.18,
+    shadowRadius: 28,
+    elevation: 12,
   },
-
-  dot: {
-    backgroundColor: "#ffffff",
+  iconWrap: {
+    width: 60,
+    height: 60,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 16,
+  },
+  iconRing: {
+    position: "absolute",
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    borderWidth: 2,
+  },
+  icon: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  title: {
+    fontFamily: "Yekan",
+    fontSize: 20,
+    textAlign: "center",
+    writingDirection: "rtl",
+    marginBottom: 8,
+  },
+  message: {
+    fontFamily: "Yekan",
+    fontSize: 14,
+    lineHeight: 24,
+    textAlign: "center",
+    writingDirection: "rtl",
+    marginBottom: 20,
+  },
+  button: {
+    alignSelf: "stretch",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 52,
+    borderRadius: 18,
+    backgroundColor: BRAND,
+  },
+  buttonPressed: { opacity: 0.85, transform: [{ scale: 0.98 }] },
+  buttonBusy: { opacity: 0.75 },
+  buttonRow: { flexDirection: "row-reverse", alignItems: "center", gap: 10 },
+  buttonText: {
+    fontFamily: "Yekan",
+    fontSize: 16,
+    color: "#ffffff",
   },
 });

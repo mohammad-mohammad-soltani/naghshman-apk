@@ -6,20 +6,21 @@ import { PNG } from 'pngjs';
 
 const root = new URL('../', import.meta.url);
 
-test('covers the screen with the vector splash artwork without stretching its motif', () => {
+test('plays the site Lottie splash, bundled for first and offline launches', () => {
   const source = readFileSync(new URL('src/components/launch-splash.tsx', root), 'utf8');
 
-  assert.match(source, /massage\.generated\.json/);
-  assert.match(source, /<SvgXml[\s\S]*xml=\{artwork\.vectors\}/);
-  assert.match(source, /<SvgImage/);
-  assert.match(source, /width="100%"[\s\S]*height="100%"/);
-  assert.match(source, /preserveAspectRatio="xMidYMid meet"/);
-  assert.match(source, /width:\s*screenWidth/);
-  assert.match(source, /height:\s*screenWidth \* \(ARTWORK_HEIGHT \/ ARTWORK_WIDTH\)/);
-  assert.match(source, /artworkContainer:\s*\{[\s\S]*alignSelf:\s*"center"/);
-  assert.doesNotMatch(source, /splash-dotless\.jpg/);
-  assert.doesNotMatch(source, /useWindowDimensions/);
-  assert.doesNotMatch(source, /artworkSize/);
+  assert.match(source, /require\("\.\.\/\.\.\/assets\/splash\/splash-light\.json"\)/);
+  assert.match(source, /require\("\.\.\/\.\.\/assets\/splash\/splash-dark\.json"\)/);
+  assert.match(source, /readCachedSplash\(theme\) \?\? BUNDLED_SPLASH\[theme\]/);
+  assert.match(source, /<LottieView[\s\S]*loop=\{false\}[\s\S]*resizeMode="contain"/);
+  assert.doesNotMatch(source, /massage\.generated\.json|SvgXml/);
+
+  for (const theme of ['light', 'dark']) {
+    const animation = JSON.parse(readFileSync(new URL(`assets/splash/splash-${theme}.json`, root), 'utf8'));
+    assert.equal(animation.w, 360);
+    assert.equal(animation.h, 640);
+    assert.ok(Array.isArray(animation.layers) && animation.layers.length > 0);
+  }
 });
 
 test('keeps the adaptive icon mark centered inside a 66 percent safe area', () => {
@@ -61,7 +62,10 @@ test('replaces the WebView diagnostic page with a retryable branded overlay', ()
   assert.match(shell, /onError=\{handleWebViewError\}/);
   assert.match(shell, /completedDocumentUrl\.current !== event\.nativeEvent\.url/);
   assert.match(shell, /onRenderProcessGone/);
-  assert.doesNotMatch(splash, /errorPanel|Pressable|ActivityIndicator/);
+  // Offline at launch is told on the splash itself, with its own retry.
+  assert.match(splash, /شما آفلاین هستید/);
+  assert.match(splash, /accessibilityLabel="تلاش مجدد"/);
+  assert.match(splash, /<Wiggle active=\{showOffline\}/);
 });
 
 test('uses a white safe area in light mode and the document color in dark mode', () => {

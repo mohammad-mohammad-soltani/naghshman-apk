@@ -1,11 +1,14 @@
+import * as Application from "expo-application";
 import * as Clipboard from "expo-clipboard";
 import Constants from "expo-constants";
-import { File, Paths } from "expo-file-system";
+import { Directory, File, Paths } from "expo-file-system";
 import { NavigationBar } from "expo-navigation-bar";
 import { useNetworkState } from "expo-network";
 import * as SecureStore from "expo-secure-store";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Appearance,
+  AppState,
   BackHandler,
   Linking,
   Platform,
@@ -22,10 +25,32 @@ import {
   type WebViewNavigation,
 } from "react-native-webview";
 
+import { ForceUpdateScreen } from "@/components/force-update-screen";
 import { LaunchSplash } from "@/components/launch-splash";
 import { WebLoadError } from "@/components/web-load-error";
+import {
+  parseAppReleaseStatus,
+  parseVersionCode,
+  releaseStatusUrl,
+  requiresUpdate,
+  type AppReleaseStatus,
+} from "@/lib/app-release";
+import { readStoredRelease, storeRelease } from "@/lib/app-release-store";
 import { isInitialWebDocument } from "@/lib/initial-web-document";
-import { isLaunchSplashVisible } from "@/lib/launch-splash-visibility";
+import { galleryFilename, isGalleryMedia } from "@/lib/media-save";
+import {
+  INITIAL_LAUNCH_GATE,
+  isRetryingLaunch,
+  LAUNCH_PROBE_TIMEOUT_MS,
+  OPEN_LAUNCH_GATE,
+  reduceLaunchGate,
+  showsOfflineCard,
+  type LaunchGateEvent,
+} from "@/lib/launch-gate";
+import {
+  isLaunchSplashVisible,
+  SPLASH_ANIMATION_CAP_MS,
+} from "@/lib/launch-splash-visibility";
 import {
   initialNativeWebUrl,
   shouldAllowNativeGuestNavigation,
@@ -44,6 +69,17 @@ import {
   softRetryDelay,
   type WebShellEvent,
 } from "@/lib/web-shell-state";
+import {
+  resolveSplashTheme,
+  SPLASH_BACKGROUND,
+  SPLASH_THEMES,
+  type SplashTheme,
+} from "@/lib/splash-cache";
+import {
+  checkForSplashUpdate,
+  readSplashMeta,
+  saveSplashTheme,
+} from "@/lib/splash-store";
 import { shouldHandleWebViewBack } from "@/lib/webview-back-navigation";
 import * as SplashScreen from "expo-splash-screen";
 
@@ -52,8 +88,22 @@ const REFRESH_TOKEN_KEY = "naghshman.refresh-token";
 const BRAND_BACKGROUND = "#dc2626";
 const OFFLINE_NOTICE = "اینترنت قطع است؛ دوباره تلاش می‌کنیم.";
 const RETRYING_NOTICE = "ارتباط برقرار نشد؛ دوباره تلاش می‌کنیم.";
-const LAUNCH_BACKGROUND = "#c03636";
-const MIN_CUSTOM_SPLASH_MS = 2000;
+/** The Android versionCode of this install; null in dev runtimes and on iOS. */
+const ANDROID_VERSION_CODE =
+  Platform.OS === "android"
+    ? parseVersionCode(Application?.nativeBuildVersion)
+    : null;
+const RELEASE_CHECK_TIMEOUT_MS = 8000;
+
+/** A retry that answers instantly still shows its spinner long enough to read. */
+const MIN_RETRY_FEEDBACK_MS = 700;
+
+function initialSplashTheme(native: boolean): SplashTheme {
+  return resolveSplashTheme(
+    native ? readSplashMeta().theme : null,
+    Appearance?.getColorScheme?.(),
+  );
+}
 
 type NotificationsModule = typeof import("expo-notifications");
 
@@ -390,21 +440,6 @@ function nativeBootstrap(
 `;
 }
 
-function filenameFor(url: string, supplied?: string): string {
-  if (supplied && /^[\\w.-]+$/u.test(supplied)) return supplied;
-  try {
-    const lastPathSegment = new URL(url).pathname
-      .split("/")
-      .filter(Boolean)
-      .pop();
-    return lastPathSegment && /\\.[a-z0-9]{2,8}$/iu.test(lastPathSegment)
-      ? lastPathSegment
-      : `naghshman-${Date.now()}.jpg`;
-  } catch {
-    return `naghshman-${Date.now()}.jpg`;
-  }
-}
-
 export function NativeWebShell() {
   const nativePlatform =
     Platform.OS === "android" || Platform.OS === "ios" ? Platform.OS : null;
@@ -441,8 +476,20 @@ export function NativeWebShell() {
   const [webViewGeneration, setWebViewGeneration] = useState(0);
   const [splashOverlayMounted, setSplashOverlayMounted] = useState(true);
   const [nativeSplashReleased, setNativeSplashReleased] = useState(false);
-  const [minimumCustomSplashElapsed, setMinimumCustomSplashElapsed] =
-    useState(false);
+  const [splashAnimationFinished, setSplashAnimationFinished] = useState(false);
+  // Fixed for this launch: the animation never swaps theme mid-play.
+  const [splashTheme] = useState(() => initialSplashTheme(Boolean(nativePlatform)));
+  // The WebView is not opened until the site has answered once.
+  const initialLaunchGate = nativePlatform
+    ? INITIAL_LAUNCH_GATE
+    : OPEN_LAUNCH_GATE;
+  const launchGateRef = useRef(initialLaunchGate);
+  const [launchGate, setLaunchGate] = useState(initialLaunchGate);
+  const launchProbeInFlight = useRef(false);
+  // Seeded from disk, so a forced update also holds on an offline launch.
+  const [release, setRelease] = useState<AppReleaseStatus | null>(() =>
+    ANDROID_VERSION_CODE ? readStoredRelease() : null,
+  );
   const [safeAreaBackground, setSafeAreaBackground] = useState("#ffffff");
   const [notice, setNotice] = useState<string | null>(null);
   const [storedRefreshToken, setStoredRefreshToken] = useState<
@@ -486,15 +533,103 @@ export function NativeWebShell() {
     setSplashOverlayMounted(false);
   }, []);
 
+  const handleSplashAnimationFinish = useCallback(() => {
+    setSplashAnimationFinished(true);
+  }, []);
+
+  // The splash plays through once on every launch, like the site's; a slow or
+  // broken animation is capped so it never holds the app back.
   useEffect(() => {
-    if (!nativeSplashReleased || minimumCustomSplashElapsed) return;
+    if (!nativeSplashReleased || splashAnimationFinished) return;
 
     const timer = setTimeout(() => {
-      setMinimumCustomSplashElapsed(true);
-    }, MIN_CUSTOM_SPLASH_MS);
+      setSplashAnimationFinished(true);
+    }, SPLASH_ANIMATION_CAP_MS);
 
     return () => clearTimeout(timer);
-  }, [minimumCustomSplashElapsed, nativeSplashReleased]);
+  }, [nativeSplashReleased, splashAnimationFinished]);
+
+  const dispatchLaunchGate = useCallback((event: LaunchGateEvent) => {
+    const next = reduceLaunchGate(launchGateRef.current, event);
+    if (next === launchGateRef.current) return;
+    launchGateRef.current = next;
+    setLaunchGate(next);
+  }, []);
+
+  // One request is both the reachability probe and the splash update check:
+  // a 304 (or a fresh splash) proves the site answers.
+  const probeLaunch = useCallback(async () => {
+    if (launchProbeInFlight.current || launchGateRef.current.status === "online")
+      return;
+    launchProbeInFlight.current = true;
+    const retry = launchGateRef.current.wasOffline;
+    dispatchLaunchGate({ type: "probe-started" });
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), LAUNCH_PROBE_TIMEOUT_MS);
+    const [{ reachable }] = await Promise.all([
+      checkForSplashUpdate(APP_URL, splashTheme, controller.signal),
+      retry
+        ? new Promise((resolve) => setTimeout(resolve, MIN_RETRY_FEEDBACK_MS))
+        : null,
+    ]);
+    clearTimeout(timeout);
+    launchProbeInFlight.current = false;
+    dispatchLaunchGate({ type: "probe-finished", reachable });
+
+    if (reachable) {
+      // Keep the other theme's copy fresh too, quietly and without a deadline.
+      for (const theme of SPLASH_THEMES) {
+        if (theme !== splashTheme) void checkForSplashUpdate(APP_URL, theme);
+      }
+    }
+  }, [dispatchLaunchGate, splashTheme]);
+
+  useEffect(() => {
+    if (!nativePlatform) return;
+    void probeLaunch();
+  }, [nativePlatform, probeLaunch]);
+
+  // Forced update: asked on every launch and every return to the app, so the
+  // admin's button reaches users who keep the app open in the background too.
+  useEffect(() => {
+    const versionCode = ANDROID_VERSION_CODE;
+    if (!versionCode) return;
+    let active = true;
+    let inFlight = false;
+
+    const check = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), RELEASE_CHECK_TIMEOUT_MS);
+      try {
+        const response = await fetch(releaseStatusUrl(APP_URL, versionCode), {
+          headers: { Accept: "application/json" },
+          signal: controller.signal,
+        });
+        if (!response.ok) return;
+        const status = parseAppReleaseStatus(await response.json());
+        if (!status || !active) return;
+        storeRelease(status);
+        setRelease(status);
+      } catch {
+        // Offline or the site is down: keep the last known requirement.
+      } finally {
+        clearTimeout(timeout);
+        inFlight = false;
+      }
+    };
+
+    void check();
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") void check();
+    });
+    return () => {
+      active = false;
+      subscription.remove();
+    };
+  }, []);
 
   const dispatchShellEvent = useCallback((event: WebShellEvent) => {
     const next = reduceWebShellState(shellStateRef.current, event);
@@ -587,38 +722,66 @@ export function NativeWebShell() {
   useEffect(() => {
     if (!canUseNativePush || !nativeAuthenticated) return;
     let active = true;
+    let registered = false;
+    let inFlight = false;
 
-    void (async () => {
-      const Notifications = await import("expo-notifications");
-      configureNotificationHandler(Notifications);
-      if (Platform.OS === "android") {
-        await Notifications.setNotificationChannelAsync("default", {
-          name: "اعلان‌های نقش من",
-          importance: Notifications.AndroidImportance.HIGH,
-          vibrationPattern: [0, 250, 150, 250],
-          lightColor: BRAND_BACKGROUND,
-        });
+    const register = async () => {
+      if (registered || inFlight) return;
+      inFlight = true;
+      try {
+        const Notifications = await import("expo-notifications");
+        configureNotificationHandler(Notifications);
+        if (Platform.OS === "android") {
+          // Android 13+ only shows the permission prompt once a channel exists.
+          await Notifications.setNotificationChannelAsync("default", {
+            name: "اعلان‌های نقش من",
+            importance: Notifications.AndroidImportance.HIGH,
+            vibrationPattern: [0, 250, 150, 250],
+            lightColor: BRAND_BACKGROUND,
+            lockscreenVisibility:
+              Notifications.AndroidNotificationVisibility.PUBLIC,
+            sound: "default",
+            showBadge: true,
+          });
+        }
+        const existing = await Notifications.getPermissionsAsync();
+        const permission =
+          existing.status === "granted" || !existing.canAskAgain
+            ? existing
+            : await Notifications.requestPermissionsAsync();
+        // Re-checked whenever the app returns to the foreground, so turning
+        // notifications on in system settings takes effect without a restart.
+        if (permission.status !== "granted") return;
+
+        const projectId =
+          Constants.expoConfig?.extra?.eas?.projectId ??
+          Constants.easConfig?.projectId;
+        if (!projectId) {
+          console.warn("[push] EAS projectId is missing; no push token.");
+          return;
+        }
+        const token = (await Notifications.getExpoPushTokenAsync({ projectId }))
+          .data;
+        if (!active || !isExpoPushToken(token)) return;
+        registered = true;
+        setNativePushToken(token);
+      } catch (error) {
+        // On Android this is usually "Default FirebaseApp is not initialized":
+        // the build has no google-services.json (see app.config.ts).
+        console.warn("[push] Could not register for notifications:", error);
+      } finally {
+        inFlight = false;
       }
-      const existing = await Notifications.getPermissionsAsync();
-      const permission =
-        existing.status === "granted"
-          ? existing
-          : await Notifications.requestPermissionsAsync();
-      if (permission.status !== "granted") return;
+    };
 
-      const projectId =
-        Constants.expoConfig?.extra?.eas?.projectId ??
-        Constants.easConfig?.projectId;
-      if (!projectId) return;
-      const token = (await Notifications.getExpoPushTokenAsync({ projectId }))
-        .data;
-      if (active && isExpoPushToken(token)) setNativePushToken(token);
-    })().catch(() => {
-      // A later app launch retries transient network and provider failures.
+    void register();
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") void register();
     });
 
     return () => {
       active = false;
+      subscription.remove();
     };
   }, [canUseNativePush, nativeAuthenticated]);
 
@@ -706,6 +869,16 @@ export function NativeWebShell() {
     const retry = shouldRetryFailedLoad(shellStateRef.current, online);
 
     dispatchShellEvent({ type: "network-changed", online });
+    if (launchGateRef.current.status !== "online") {
+      dispatchLaunchGate({
+        type: "network-changed",
+        connected: network.isConnected,
+      });
+      // Back online while the offline splash is up: carry on by itself.
+      if (online && launchGateRef.current.status === "offline")
+        void probeLaunch();
+      return;
+    }
     if (!retry || redirectFailureRef.current) return;
     if (shellStateRef.current.documentFailed) {
       retryFailedPage();
@@ -716,9 +889,11 @@ export function NativeWebShell() {
     dispatchShellEvent({ type: "retry-started" });
     retrySoftly();
   }, [
+    dispatchLaunchGate,
     dispatchShellEvent,
     network.isConnected,
     network.isInternetReachable,
+    probeLaunch,
     retryFailedPage,
     retrySoftly,
   ]);
@@ -830,31 +1005,57 @@ export function NativeWebShell() {
     syncNativePushToken();
   }, [syncNativePushToken]);
 
+  const savingMedia = useRef(false);
   const saveMedia = useCallback(
-    async (url: string, suppliedFilename?: string) => {
+    async (url: string) => {
       if (Platform.OS !== "android") return;
+      // A second tap while a large video downloads must not start a duplicate.
+      if (savingMedia.current) {
+        showNotice("در حال ذخیرهٔ رسانهٔ قبلی هستیم…");
+        return;
+      }
+      savingMedia.current = true;
+      let folder: Directory | null = null;
 
       try {
         // Expo Go on Android does not bundle the full media-library native module.
         // Loading it only when saving keeps the rest of the app usable in Expo Go.
         const MediaLibrary = await import("expo-media-library/legacy");
-        const permission = await MediaLibrary.requestPermissionsAsync(true);
+        const permission = await MediaLibrary.requestPermissionsAsync(true, [
+          "photo",
+          "video",
+        ]);
         if (permission.status !== "granted") {
-          showNotice("اجازهٔ ذخیره‌سازی در گالری داده نشد.");
+          showNotice("برای ذخیره، اجازهٔ دسترسی به گالری لازم است.");
           return;
         }
 
-        const destination = new File(
-          Paths.cache,
-          filenameFor(url, suppliedFilename),
-        );
-        const file = destination.exists
-          ? destination
-          : await File.downloadFileAsync(url, destination);
-        await MediaLibrary.createAssetAsync(file.uri);
-        showNotice("رسانه در گالری ذخیره شد.");
+        showNotice("در حال ذخیره در گالری…");
+        // Download into an empty folder: the file is then named from the
+        // response's Content-Type, so proxied media without an extension in its
+        // URL (e.g. /api/content/1/media/2) still lands as .mp4 or .jpg.
+        folder = new Directory(Paths.cache, `media-${Date.now()}`);
+        folder.create({ intermediates: true, idempotent: true });
+        const downloaded = await File.downloadFileAsync(url, folder, {
+          idempotent: true,
+        });
+        if (!isGalleryMedia(downloaded.name)) {
+          showNotice("این فایل تصویر یا ویدیو نیست و در گالری ذخیره نمی‌شود.");
+          return;
+        }
+        downloaded.rename(galleryFilename(downloaded.name, Date.now()));
+        await MediaLibrary.createAssetAsync(downloaded.uri);
+        showNotice("در گالری ذخیره شد.");
       } catch {
-        showNotice("ذخیره‌سازی رسانه ممکن نشد. دوباره تلاش کنید.");
+        showNotice("ذخیره‌سازی ممکن نشد. اتصال را بررسی کنید و دوباره تلاش کنید.");
+      } finally {
+        savingMedia.current = false;
+        try {
+          // MediaStore keeps its own copy; the download is only a staging file.
+          folder?.delete();
+        } catch {
+          // The OS clears the cache directory eventually.
+        }
       }
     },
     [showNotice],
@@ -870,9 +1071,11 @@ export function NativeWebShell() {
           setSafeAreaBackground(
             action.theme === "light" ? "#ffffff" : action.color,
           );
+          // The next launch's splash follows the theme picked on the site.
+          if (nativePlatform) saveSplashTheme(action.theme);
           break;
         case "save-media":
-          await saveMedia(action.url, action.filename);
+          await saveMedia(action.url);
           break;
         case "share":
           await Share.share({ message: action.url, title: action.title });
@@ -908,7 +1111,7 @@ export function NativeWebShell() {
           break;
       }
     },
-    [saveMedia, setNativeAuthentication, showNotice],
+    [nativePlatform, saveMedia, setNativeAuthentication, showNotice],
   );
 
   const handleLoadEnd = useCallback(
@@ -1031,6 +1234,7 @@ export function NativeWebShell() {
   useEffect(() => {
     if (
       !initialWebUrl ||
+      launchGate.status !== "online" ||
       shellState.documentFailed ||
       (!loading && shellState.initialReady)
     )
@@ -1043,6 +1247,7 @@ export function NativeWebShell() {
   }, [
     handlePageFailure,
     initialWebUrl,
+    launchGate.status,
     loading,
     shellState.documentFailed,
     shellState.initialReady,
@@ -1104,19 +1309,24 @@ export function NativeWebShell() {
     [nativePlatform],
   );
 
+  const launchOffline = showsOfflineCard(launchGate);
   const launchSplashVisible =
     isLaunchSplashVisible(
       shellState.initialReady,
       nativeSplashReleased,
-      minimumCustomSplashElapsed,
+      splashAnimationFinished,
+      launchOffline,
     ) &&
     !shellState.documentFailed &&
     !retrying;
+  const splashBackground = SPLASH_BACKGROUND[splashTheme];
   const systemChromeBackground = splashOverlayMounted
-    ? LAUNCH_BACKGROUND
+    ? splashBackground
     : safeAreaBackground;
   const lightWebTheme =
     !splashOverlayMounted && safeAreaBackground === "#ffffff";
+  const splashBarStyle =
+    splashTheme === "light" ? "dark-content" : "light-content";
 
   const recovery = (
     <WebLoadError
@@ -1128,7 +1338,7 @@ export function NativeWebShell() {
   );
 
   const webView =
-    nativeAuthStateResolved && initialWebUrl ? (
+    nativeAuthStateResolved && initialWebUrl && launchGate.status === "online" ? (
       <WebView
         key={webViewGeneration}
         ref={webViewRef}
@@ -1145,7 +1355,14 @@ export function NativeWebShell() {
         androidLayerType={Platform.OS === "android" ? "hardware" : undefined}
         automaticallyAdjustContentInsets={false}
         contentInsetAdjustmentBehavior="never"
-        renderLoading={() => <View style={styles.webViewErrorFallback} />}
+        renderLoading={() => (
+          <View
+            style={[
+              styles.webViewErrorFallback,
+              { backgroundColor: splashBackground },
+            ]}
+          />
+        )}
         originWhitelist={["https://*"]}
         onMessage={(event) => void handleMessage(event)}
         onShouldStartLoadWithRequest={shouldStartLoad}
@@ -1189,7 +1406,7 @@ export function NativeWebShell() {
         backgroundColor={systemChromeBackground}
         barStyle={
           splashOverlayMounted
-            ? "light-content"
+            ? splashBarStyle
             : statusBarStyleFor(safeAreaBackground)
         }
       />
@@ -1214,16 +1431,38 @@ export function NativeWebShell() {
         <View
           pointerEvents="none"
           accessibilityLiveRegion="polite"
-          style={styles.notice}
+          style={[
+            styles.notice,
+            lightWebTheme ? styles.noticeLight : styles.noticeDark,
+          ]}
         >
-          <Text style={styles.noticeText}>{notice}</Text>
+          <Text
+            style={[
+              styles.noticeText,
+              { color: lightWebTheme ? "#101010" : "#f5f5f7" },
+            ]}
+          >
+            {notice}
+          </Text>
         </View>
       )}
       <LaunchSplash
         visible={launchSplashVisible}
+        theme={splashTheme}
+        offline={launchOffline}
+        retrying={isRetryingLaunch(launchGate)}
+        onRetry={() => void probeLaunch()}
         onReady={hideNativeSplash}
+        onAnimationFinish={handleSplashAnimationFinish}
         onHidden={handleSplashHidden}
       />
+      {ANDROID_VERSION_CODE && release && requiresUpdate(ANDROID_VERSION_CODE, release) ? (
+        <ForceUpdateScreen
+          status={release}
+          theme={splashTheme}
+          versionCode={ANDROID_VERSION_CODE}
+        />
+      ) : null}
     </View>
   );
 }
@@ -1242,20 +1481,27 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1 },
   webFrame: { flex: 1, backgroundColor: "#ffffff" },
   webView: { flex: 1, backgroundColor: "#ffffff" },
-  webViewErrorFallback: { flex: 1, backgroundColor: LAUNCH_BACKGROUND },
+  webViewErrorFallback: { flex: 1 },
   notice: {
     position: "absolute",
     zIndex: 3000,
     bottom: 34,
     left: 20,
     right: 20,
-    backgroundColor: "#1d2825",
-    borderRadius: 14,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 16,
     paddingVertical: 12,
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    elevation: 10,
   },
+  // The site's popover surfaces (`--popover`), so a toast reads as part of it.
+  noticeLight: { backgroundColor: "#ffffff", borderColor: "#e8e8ec" },
+  noticeDark: { backgroundColor: "#242424", borderColor: "#333333" },
   noticeText: {
-    color: "#ffffff",
     fontFamily: "Yekan",
     fontSize: 14,
     textAlign: "center",

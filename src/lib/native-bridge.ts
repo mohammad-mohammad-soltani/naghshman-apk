@@ -16,6 +16,11 @@ export type NativeBridgeAction =
   | { type: 'persist-refresh'; token: string }
   | { type: 'clear-refresh' };
 
+// Uploads are served from object storage and legacy deployment hosts, never
+// navigated to. These may be saved, shared or opened, but not loaded in-app.
+const MEDIA_HOSTS = new Set(['naghshman-media.s3.ir-thr-at1.arvanstorage.ir']);
+const MEDIA_DOMAIN_SUFFIXES = ['naghshman.ir', 'nabzjahan.ir'];
+
 type BridgeEnvelope = {
   source?: unknown;
   version?: unknown;
@@ -32,6 +37,22 @@ export function isAllowedWebUrl(value: string): boolean {
   try {
     const url = new URL(value);
     return url.protocol === 'https:' && ALLOWED_HOSTS.has(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+export function isAllowedMediaUrl(value: string): boolean {
+  if (isAllowedWebUrl(value)) return true;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:') return false;
+    return (
+      MEDIA_HOSTS.has(url.hostname) ||
+      MEDIA_DOMAIN_SUFFIXES.some(
+        (domain) => url.hostname === domain || url.hostname.endsWith(`.${domain}`),
+      )
+    );
   } catch {
     return false;
   }
@@ -81,7 +102,7 @@ export function parseNativeBridgeMessage(value: string): NativeBridgeAction | nu
       : null;
   }
 
-  if (typeof message.url !== 'string' || !isAllowedWebUrl(message.url)) return null;
+  if (typeof message.url !== 'string' || !isAllowedMediaUrl(message.url)) return null;
 
   switch (message.type) {
     case 'save-media':

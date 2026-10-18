@@ -32,6 +32,7 @@ function mountShell() {
     'expo-network': { useNetworkState: () => ({ isConnected: true }) },
     'expo-constants': { default: { executionEnvironment: 'storeClient' } },
     '@/components/launch-splash': { LaunchSplash: 'LaunchSplash' },
+    '@/components/force-update-screen': { ForceUpdateScreen: 'ForceUpdateScreen' },
   };
   const root = resolve(new URL('../', import.meta.url).pathname);
   const require = createRequire(import.meta.url);
