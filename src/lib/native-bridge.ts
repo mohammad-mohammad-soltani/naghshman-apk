@@ -17,6 +17,7 @@ export type NativeBridgeAction =
   | { type: 'persist-refresh'; token: string }
   | { type: 'clear-refresh' }
   | { type: 'ensure-media-permission'; requestId: string; kinds: MediaPermissionKind[] }
+  | { type: 'document-start' }
   | { type: 'floating-layout'; navHeight: number; audioTop: number | null }
   | { type: 'native-audio-load'; track: NativeAudioTrack; position: number; autoplay: boolean }
   | { type: 'native-audio-play' }
@@ -143,6 +144,7 @@ export function parseNativeBridgeMessage(value: string): NativeBridgeAction | nu
   }
 
   if (message.type === 'clear-refresh') return { type: 'clear-refresh' };
+  if (message.type === 'document-start') return { type: 'document-start' };
 
   if (message.type === 'set-safe-area-background') {
     return isOpaqueHexColor(message.color) &&

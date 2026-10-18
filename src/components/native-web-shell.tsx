@@ -45,6 +45,7 @@ import {
   type AppReleaseStatus,
 } from "@/lib/app-release";
 import { readStoredRelease, storeRelease } from "@/lib/app-release-store";
+import { EXTERNAL_APP_WHITELIST, webFallbackFor } from "@/lib/external-links";
 import { isInitialWebDocument } from "@/lib/initial-web-document";
 import {
   INITIAL_LAUNCH_GATE,
@@ -223,6 +224,9 @@ function nativeBootstrap(
         window.__naghshmanRestoreInProgress = false;
       }
     });
+    // Runs once per document. Android also reports in-site navigations as
+    // load starts, so this is how the app tells a real page load apart.
+    post({ type: 'document-start' });
     window.addEventListener('naghshman:native-push-token', function (event) {
       var detail = event && event.detail;
       var token = detail && detail.token;
@@ -1147,14 +1151,8 @@ export function NativeWebShell() {
   const { ensure: ensureMediaPermissions, sheet: permissionSheet } =
     useMediaPermissions(chromeTheme);
 
-  // Links off the site open in an in-app browser tab over the app, the way
-  // X and Telegram do, instead of switching to another app.
-  const openExternal = useCallback(
+  const openInBrowser = useCallback(
     (url: string) => {
-      if (!/^https?:\/\//iu.test(url)) {
-        Linking.openURL(url).catch(() => {});
-        return;
-      }
       WebBrowser.openBrowserAsync(url, {
         toolbarColor: safeAreaBackground,
         controlsColor: BRAND_BACKGROUND,
@@ -1164,6 +1162,29 @@ export function NativeWebShell() {
       }).catch(() => Linking.openURL(url).catch(() => {}));
     },
     [safeAreaBackground],
+  );
+
+  // Links off the site open in an in-app browser tab over the app, the way
+  // X and Telegram do, instead of switching to another app. Directions, calls
+  // and mail go to the phone's own apps.
+  const openExternal = useCallback(
+    (url: string) => {
+      if (/^https?:\/\//iu.test(url)) {
+        openInBrowser(url);
+        return;
+      }
+      Linking.openURL(url).catch(() => {
+        // No map app installed: directions still open, on the web.
+        const fallback = webFallbackFor(url);
+        if (fallback) openInBrowser(fallback);
+        else
+          showNotice(
+            "برنامه‌ای برای باز کردن این پیوند روی گوشی نیست.",
+            "error",
+          );
+      });
+    },
+    [openInBrowser, showNotice],
   );
 
   const downloads = useDownloads(showNotice, openExternal);
@@ -1190,6 +1211,11 @@ export function NativeWebShell() {
           break;
         case "open-file":
           await openFile(action.url, action.filename);
+          break;
+        case "document-start":
+          // A fresh page has no mini player for what the app was playing.
+          nativeAudio.resetForNewDocument();
+          setFloatingLayout(INITIAL_FLOATING_LAYOUT);
           break;
         case "floating-layout":
           setFloatingLayout((current) =>
@@ -1322,14 +1348,12 @@ export function NativeWebShell() {
     (event: { nativeEvent: { url: string } }) => {
       if (!isInitialWebDocument(event.nativeEvent.url)) return;
       mainDocumentUrl.current = event.nativeEvent.url;
-      nativeAudio.resetForNewDocument();
-      setFloatingLayout(INITIAL_FLOATING_LAYOUT);
       setLoading(true);
       webViewDocumentReady.current = false;
       completedDocumentUrl.current = null;
       initialAttemptHadError.current = false;
     },
-    [nativeAudio],
+    [],
   );
 
   const handleLoad = useCallback(
@@ -1540,7 +1564,9 @@ export function NativeWebShell() {
             ]}
           />
         )}
-        originWhitelist={["https://*"]}
+        // Map, phone and mail links reach shouldStartLoad, which hands them
+        // to their apps (see external-links.ts).
+        originWhitelist={["https://*", ...EXTERNAL_APP_WHITELIST]}
         onMessage={(event) => void handleMessage(event)}
         onShouldStartLoadWithRequest={shouldStartLoad}
         onNavigationStateChange={(navigation) => {
