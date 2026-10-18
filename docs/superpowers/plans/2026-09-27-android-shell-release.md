@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship a Meydan-branded Naghshman Android WebView APK for Myket with one splash lifecycle, resilient offline behavior, safe-area layout, and a validated 35–45 MiB arm64 release artifact.
+**Goal:** Ship a Meydan-branded Naghshman Android WebView APK for Myket with one splash lifecycle, resilient offline behavior, safe-area layout, and a validated arm64 release artifact of at most 30 MiB.
 
 **Architecture:** Keep the native Expo splash until a React overlay with identical branding is mounted, then keep that overlay above the WebView until its first successful document load. Extract first-load retry decisions into a pure state helper, keep an already loaded WebView mounted across network changes, and enforce APK architecture/optimization/size through Expo config and CI.
 
@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Myket receives a release APK targeting only `arm64-v8a`.
-- Final APK size must be between 35 MiB and 45 MiB inclusive.
+- Final APK size must be at most 30 MiB (no minimum).
 - Brand color is Meydan red `#dc2626`.
 - Use the supplied dotless splash artwork; render three animated dots at runtime in right-to-left order.
 - Do not unmount a loaded WebView when network state changes.

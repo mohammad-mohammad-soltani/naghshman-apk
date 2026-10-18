@@ -2,7 +2,7 @@
 
 ## Goal
 
-Deliver a production-ready Android WebView shell for `naghshman.ir` whose signed Myket APK is between 35 and 45 MB, uses Meydan branding, presents one continuous splash experience, preserves the loaded web application through connectivity changes, and keeps all web content inside Android safe areas.
+Deliver a production-ready Android WebView shell for `naghshman.ir` whose signed Myket APK stays as small as possible (at most 30 MiB), uses Meydan branding, presents one continuous splash experience, preserves the loaded web application through connectivity changes, and keeps all web content inside Android safe areas.
 
 ## Distribution and size contract
 
@@ -10,7 +10,7 @@ Deliver a production-ready Android WebView shell for `naghshman.ir` whose signed
 - The APK targets `arm64-v8a` only. The accepted trade-off is that 32-bit-only Android devices cannot install it.
 - Release minification, unused-resource shrinking, JavaScript bundle compression, and compressed native-library packaging are enabled.
 - Unused template dependencies, components, and assets are removed when they are not reachable from the production application.
-- CI measures the final APK file in bytes and fails unless its size is between 35 MiB and 45 MiB inclusive.
+- CI measures the final APK file in bytes and fails if it exceeds 30 MiB (no minimum; the former 35 MiB padding was removed on 2026-10-18).
 - The workflow uploads the validated APK as a GitHub Actions artifact.
 
 ## Branding
@@ -57,7 +57,7 @@ If the initial document cannot load, the splash remains visible and the shell re
 - Unit tests cover native bridge validation and any extracted first-load/retry state logic.
 - Run `npm ci`, the Node tests, Expo lint, TypeScript type checking, and Expo Doctor.
 - Generate an Expo prebuild/config inspection to verify the arm64-only and release-shrinking settings.
-- Run the EAS Myket build, download the produced APK, verify the 35–45 MiB contract, and inspect the APK when the size is outside the target.
+- Run the EAS Myket build, download the produced APK, verify the 30 MiB ceiling, and inspect the APK when the size is outside the target.
 - Confirm CI and GitHub status after pushing `main`.
 
 ## Acceptance criteria
@@ -68,4 +68,4 @@ If the initial document cannot load, the splash remains visible and the shell re
 - Going offline after the page loads does not replace or unload the page.
 - Web content does not sit beneath Android system bars.
 - The launcher uses the Meydan icon and the shell uses Meydan red.
-- The distributable Myket APK is a release, arm64 APK between 35 and 45 MiB.
+- The distributable Myket APK is a release, arm64 APK of at most 30 MiB.

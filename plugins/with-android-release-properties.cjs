@@ -1,7 +1,4 @@
-const { mkdirSync, writeFileSync } = require('node:fs');
-const { dirname, join } = require('node:path');
-
-const { AndroidConfig, withDangerousMod } = require('expo/config-plugins');
+const { AndroidConfig } = require('expo/config-plugins');
 
 const { createBuildGradlePropsConfigPlugin } = AndroidConfig.BuildProperties;
 
@@ -19,42 +16,7 @@ const withBuildGradleProperties = createBuildGradlePropsConfigPlugin(
   'withAndroidReleaseProperties',
 );
 
-function createReleasePadding(outputPath, bytes) {
-  const buffer = Buffer.allocUnsafe(bytes);
-  let value = 0x6d2b79f5;
-
-  for (let offset = 0; offset < bytes; offset += 4) {
-    value ^= value << 13;
-    value ^= value >>> 17;
-    value ^= value << 5;
-    const remaining = Math.min(4, bytes - offset);
-    for (let byte = 0; byte < remaining; byte += 1) {
-      buffer[offset + byte] = (value >>> (byte * 8)) & 0xff;
-    }
-  }
-
-  mkdirSync(dirname(outputPath), { recursive: true });
-  writeFileSync(outputPath, buffer);
-}
-
-function withAndroidReleaseProperties(config, props) {
-  const configured = withBuildGradleProperties(config, props);
-  const paddingMiB = props?.android?.releasePaddingMiB ?? 0;
-
-  return withDangerousMod(configured, [
-    'android',
-    async (modConfig) => {
-      if (paddingMiB > 0) {
-        const outputPath = join(
-          modConfig.modRequest.platformProjectRoot,
-          'app/src/main/assets/release-size-pad.bin',
-        );
-        createReleasePadding(outputPath, paddingMiB * 1024 * 1024);
-      }
-      return modConfig;
-    },
-  ]);
-}
+// Properties only: the APK is no longer padded to a minimum size.
+const withAndroidReleaseProperties = withBuildGradleProperties;
 
 module.exports = withAndroidReleaseProperties;
-module.exports.createReleasePadding = createReleasePadding;

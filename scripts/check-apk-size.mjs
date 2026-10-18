@@ -6,15 +6,12 @@ import { pathToFileURL } from 'node:url';
 
 const MEBIBYTE = 1024 * 1024;
 
-export const MIN_APK_BYTES = 35 * MEBIBYTE;
-export const MAX_APK_BYTES = 45 * MEBIBYTE;
+/** A regression ceiling only: the APK should stay as small as it can be. */
+export const MAX_APK_BYTES = 30 * MEBIBYTE;
 
 export function assertApkSize(bytes) {
-  if (bytes < MIN_APK_BYTES) {
-    throw new Error(`APK must be at least 35 MiB; received ${(bytes / MEBIBYTE).toFixed(2)} MiB.`);
-  }
   if (bytes > MAX_APK_BYTES) {
-    throw new Error(`APK must be at most 45 MiB; received ${(bytes / MEBIBYTE).toFixed(2)} MiB.`);
+    throw new Error(`APK must be at most 30 MiB; received ${(bytes / MEBIBYTE).toFixed(2)} MiB.`);
   }
 }
 
@@ -27,7 +24,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     try {
       const bytes = statSync(apkPath).size;
       assertApkSize(bytes);
-      console.log(`APK size ${(bytes / MEBIBYTE).toFixed(2)} MiB is within the 35–45 MiB budget.`);
+      console.log(`APK size ${(bytes / MEBIBYTE).toFixed(2)} MiB is within the 30 MiB ceiling.`);
     } catch (error) {
       console.error(error instanceof Error ? error.message : error);
       process.exitCode = 1;

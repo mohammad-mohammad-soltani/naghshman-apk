@@ -52,7 +52,7 @@ jobs:
             --local \
             --output naghshman-myket.apk
 
-      - name: Enforce 35–45 MiB APK budget
+      - name: Enforce 30 MiB APK ceiling
         run: npm run check:apk-size -- naghshman-myket.apk
 
       - name: Upload accepted Myket APK
