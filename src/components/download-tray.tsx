@@ -51,12 +51,12 @@ export const SURFACE = {
 
 /** Sideways travel before a drag becomes a swipe; less stays a tap or a scroll. */
 const SWIPE_SLOP = 10;
-/** How far ahead (ms) a release projects the finger's momentum. */
-const SWIPE_PROJECTION_MS = 180;
-/** A release this fast (px/ms) toward the edge always throws the card away. */
-const SWIPE_FLING = 0.75;
-/** …and one projected past this share of the screen does too. */
-const SWIPE_DISTANCE = 0.42;
+/** Dragging the card past this share of its own width dismisses it on release. */
+const SWIPE_DISTANCE = 0.3;
+/** A flick faster than this (px/ms) dismisses it from any distance. */
+const SWIPE_FLING = 0.5;
+/** …but only once it has actually left its resting place by this much. */
+const SWIPE_FLING_MIN = 16;
 
 /** A settled tray folds away on its own unless the viewer has it open. */
 const AUTO_HIDE_MS = 4500;
@@ -500,17 +500,27 @@ export function DownloadTray({
     if (handledDismissals) onClearSettled();
   }, [handledDismissals, onClearSettled]);
 
+  const [cardWidth, setCardWidth] = useState(0);
+  const swipeX = useRef(0);
+  useEffect(() => {
+    const id = swipe.addListener(({ value }) => {
+      swipeX.current = value;
+    });
+    return () => swipe.removeListener(id);
+  }, [swipe]);
+
   /**
-   * Telegram-style swipe to dismiss. The card tracks the finger 1:1 and fades
-   * with distance; on release the finger's momentum is projected ahead, so a
-   * short flick throws it off just like a long drag, while a hesitant or
-   * reversed drag springs back. Either way the motion continues at the
-   * finger's own speed.
+   * Swipe to dismiss, in either direction. The card follows the finger 1:1 and
+   * fades with distance. On release it leaves when it was dragged past a
+   * share of its width, or flicked toward the side it is already on; anything
+   * less springs back. Left and right share every rule, mirrored.
    *
-   * Built once per screen width: rebuilding it whenever progress arrives
+   * Built once per size change: rebuilding it whenever progress arrives
    * would reset a drag in flight.
    */
   const pan = useMemo(() => {
+    let origin = 0;
+    const threshold = Math.max(cardWidth, 1) * SWIPE_DISTANCE;
     const settle = (vx: number) =>
       Animated.spring(swipe, {
         toValue: 0,
@@ -520,6 +530,20 @@ export function DownloadTray({
         mass: 0.9,
         useNativeDriver: true,
       }).start();
+    const leave = (direction: number, vx: number) => {
+      const target = direction * (screenWidth + 24);
+      const remaining = Math.abs(target - swipeX.current);
+      // Carries the finger's speed, but never crawls or snaps.
+      const speed = Math.max(Math.abs(vx), 1.1);
+      Animated.timing(swipe, {
+        toValue: target,
+        duration: Math.min(280, Math.max(110, remaining / speed)),
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start(({ finished }) => {
+        if (finished) setDismissals((count) => count + 1);
+      });
+    };
     return PanResponder.create({
       onMoveShouldSetPanResponderCapture: (_, gesture) =>
         Math.abs(gesture.dx) > SWIPE_SLOP &&
@@ -527,42 +551,23 @@ export function DownloadTray({
       onPanResponderGrant: () => {
         // Caught mid-flight: carry on from where it is.
         swipe.stopAnimation();
-        swipe.extractOffset();
+        origin = swipeX.current;
       },
-      onPanResponderMove: (_, gesture) => swipe.setValue(gesture.dx),
+      onPanResponderMove: (_, gesture) => swipe.setValue(origin + gesture.dx),
       onPanResponderTerminationRequest: () => false,
       onPanResponderRelease: (_, gesture) => {
-        swipe.flattenOffset();
-        swipe.stopAnimation((x) => {
-          const projected = x + gesture.vx * SWIPE_PROJECTION_MS;
-          const flung =
-            Math.abs(gesture.vx) > SWIPE_FLING &&
-            Math.sign(gesture.vx) === Math.sign(x);
-          if (!flung && Math.abs(projected) < screenWidth * SWIPE_DISTANCE) {
-            settle(gesture.vx);
-            return;
-          }
-          const direction = Math.sign(projected || x || gesture.vx) || 1;
-          Animated.spring(swipe, {
-            toValue: direction * (screenWidth + 32),
-            // Never slower than a brisk throw, so a slow drag past the line still leaves.
-            velocity: direction * Math.max(Math.abs(gesture.vx), 1.2),
-            stiffness: 180,
-            damping: 24,
-            overshootClamping: true,
-            restDisplacementThreshold: 4,
-            useNativeDriver: true,
-          }).start(({ finished }) => {
-            if (finished) setDismissals((count) => count + 1);
-          });
-        });
+        const x = swipeX.current;
+        const side = Math.sign(x);
+        const flung =
+          Math.abs(gesture.vx) > SWIPE_FLING &&
+          Math.sign(gesture.vx) === side &&
+          Math.abs(x) > SWIPE_FLING_MIN;
+        if (side && (flung || Math.abs(x) > threshold)) leave(side, gesture.vx);
+        else settle(gesture.vx);
       },
-      onPanResponderTerminate: (_, gesture) => {
-        swipe.flattenOffset();
-        settle(gesture.vx);
-      },
+      onPanResponderTerminate: (_, gesture) => settle(gesture.vx),
     });
-  }, [screenWidth, swipe]);
+  }, [cardWidth, screenWidth, swipe]);
 
   const settled = items.length > 0 && summary.active === 0;
   useEffect(() => {
@@ -603,6 +608,7 @@ export function DownloadTray({
         onAccessibilityAction={() => setDismissals((count) => count + 1)}
         onLayout={(event) => {
           heightRef.current = event.nativeEvent.layout.height;
+          setCardWidth(event.nativeEvent.layout.width);
           if (visible) onHeightChange(heightRef.current);
         }}
         style={[
