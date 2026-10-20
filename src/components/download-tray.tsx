@@ -501,14 +501,6 @@ export function DownloadTray({
   }, [handledDismissals, onClearSettled]);
 
   const [cardWidth, setCardWidth] = useState(0);
-  const swipeX = useRef(0);
-  useEffect(() => {
-    const id = swipe.addListener(({ value }) => {
-      swipeX.current = value;
-    });
-    return () => swipe.removeListener(id);
-  }, [swipe]);
-
   /**
    * Swipe to dismiss, in either direction. The card follows the finger 1:1 and
    * fades with distance. On release it leaves when it was dragged past a
@@ -519,7 +511,6 @@ export function DownloadTray({
    * would reset a drag in flight.
    */
   const pan = useMemo(() => {
-    let origin = 0;
     const threshold = Math.max(cardWidth, 1) * SWIPE_DISTANCE;
     const settle = (vx: number) =>
       Animated.spring(swipe, {
@@ -530,9 +521,9 @@ export function DownloadTray({
         mass: 0.9,
         useNativeDriver: true,
       }).start();
-    const leave = (direction: number, vx: number) => {
+    const leave = (from: number, direction: number, vx: number) => {
       const target = direction * (screenWidth + 24);
-      const remaining = Math.abs(target - swipeX.current);
+      const remaining = Math.abs(target - from);
       // Carries the finger's speed, but never crawls or snaps.
       const speed = Math.max(Math.abs(vx), 1.1);
       Animated.timing(swipe, {
@@ -551,21 +542,29 @@ export function DownloadTray({
       onPanResponderGrant: () => {
         // Caught mid-flight: carry on from where it is.
         swipe.stopAnimation();
-        origin = swipeX.current;
+        swipe.extractOffset();
       },
-      onPanResponderMove: (_, gesture) => swipe.setValue(origin + gesture.dx),
+      onPanResponderMove: (_, gesture) => swipe.setValue(gesture.dx),
       onPanResponderTerminationRequest: () => false,
       onPanResponderRelease: (_, gesture) => {
-        const x = swipeX.current;
-        const side = Math.sign(x);
-        const flung =
-          Math.abs(gesture.vx) > SWIPE_FLING &&
-          Math.sign(gesture.vx) === side &&
-          Math.abs(x) > SWIPE_FLING_MIN;
-        if (side && (flung || Math.abs(x) > threshold)) leave(side, gesture.vx);
-        else settle(gesture.vx);
+        swipe.flattenOffset();
+        swipe.stopAnimation((x) => {
+          const side = Math.sign(x);
+          const flung =
+            Math.abs(gesture.vx) > SWIPE_FLING &&
+            Math.sign(gesture.vx) === side &&
+            Math.abs(x) > SWIPE_FLING_MIN;
+          if (side && (flung || Math.abs(x) > threshold)) {
+            leave(x, side, gesture.vx);
+          } else {
+            settle(gesture.vx);
+          }
+        });
       },
-      onPanResponderTerminate: (_, gesture) => settle(gesture.vx),
+      onPanResponderTerminate: (_, gesture) => {
+        swipe.flattenOffset();
+        settle(gesture.vx);
+      },
     });
   }, [cardWidth, screenWidth, swipe]);
 
