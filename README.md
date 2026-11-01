@@ -41,6 +41,12 @@ This command will move the starter code to the **app-example** directory and cre
 - If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
 - Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
 
+## Release pipeline
+
+Every build of the Android app is reported live to the Meydan admin panel, uploaded to S3, and an
+administrator picks the download build and the forced-update version there. Setup, the security model and
+troubleshooting: [docs/release-pipeline.md](docs/release-pipeline.md).
+
 ## Learn more
 
 To learn more about developing your project with Expo, look at the following resources:

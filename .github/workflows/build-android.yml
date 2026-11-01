@@ -1,18 +1,44 @@
 name: Build Android APK
 
+# Every build is reported live to the Meydan admin panel («به‌روزرسانی اپ»): its steps and
+# log while it runs, then the signed APK, uploaded to S3 through a one-time URL the backend
+# hands out (no S3 key lives here). Nothing is published to users from here: an administrator
+# picks the download build and the forced-update version in the panel.
+#
+# Repository settings (Settings → Secrets and variables → Actions):
+#   secret   MEYDAN_CI_SECRET   same value as MEYDAN_APP_CI_SECRET of the backend (openssl rand -hex 32)
+#   variable MEYDAN_CI_API      https://meydanbackend.naghshman.ir/wp-json/meydan/v1
+# Without them the build still runs and still keeps its GitHub artifact, it is just not reported.
+
 on:
   push:
     branches:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+env:
+  MEYDAN_CI_API: ${{ vars.MEYDAN_CI_API }}
+  MEYDAN_CI_SECRET: ${{ secrets.MEYDAN_CI_SECRET }}
+  APK_FILE: naghshman-myket.apk
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    # The panel gives up on a build that is silent for 45 minutes; never run longer than that.
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Open the build on the Meydan panel
+        run: node scripts/ci/report.mjs start
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -32,34 +58,42 @@ jobs:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Install dependencies
-        run: npm ci
-
       - name: Verify source
         run: |
-          npm test
-          npm run lint
-          npm run typecheck
+          node scripts/ci/report.mjs step verify running
+          node scripts/ci/report.mjs run --step verify --log-only -- npm ci
+          node scripts/ci/report.mjs run --step verify --log-only -- npm test
+          node scripts/ci/report.mjs run --step verify --log-only -- npm run lint
+          node scripts/ci/report.mjs run --step verify --log-only -- npm run typecheck
+          node scripts/ci/report.mjs step verify done
 
       - name: Build signed Myket APK on GitHub runner
         env:
           EAS_LOCAL_BUILD_ARTIFACTS_DIR: ${{ github.workspace }}/local-build-artifacts
         run: |
-          eas build \
-            --platform android \
-            --profile myket \
-            --non-interactive \
-            --local \
-            --output naghshman-myket.apk
+          node scripts/ci/report.mjs run --step build -- \
+            eas build \
+              --platform android \
+              --profile myket \
+              --non-interactive \
+              --local \
+              --output "$APK_FILE"
 
       - name: Enforce 30 MiB APK ceiling
-        run: npm run check:apk-size -- naghshman-myket.apk
+        run: node scripts/ci/report.mjs run --step inspect -- npm run check:apk-size -- "$APK_FILE"
 
       # archive: false uploads the APK itself instead of a ZIP around it, so
       # the run page downloads naghshman-myket.apk ready to install.
       - name: Upload accepted Myket APK
         uses: actions/upload-artifact@v7
         with:
-          path: naghshman-myket.apk
+          path: ${{ env.APK_FILE }}
           archive: false
           if-no-files-found: error
+
+      - name: Upload the APK to S3 and register it on the panel
+        run: node scripts/ci/report.mjs upload "$APK_FILE"
+
+      - name: Close the build on the Meydan panel
+        if: always()
+        run: node scripts/ci/report.mjs finish --conclusion "${{ job.status }}"
