@@ -239,9 +239,9 @@ export function parseBadging(text) {
 }
 
 /** The newest build-tools' aapt2: AAPT2 env, else the Android SDK (GitHub's runner image has one). */
-export function findAapt2(env = process.env) {
+export function findAapt2(env = process.env, { runnerRoots = ['/usr/local/lib/android/sdk'] } = {}) {
   if (env.AAPT2 && existsSync(env.AAPT2)) return env.AAPT2;
-  const roots = [env.ANDROID_HOME, env.ANDROID_SDK_ROOT, '/usr/local/lib/android/sdk', env.HOME && join(env.HOME, 'Android/Sdk')].filter(Boolean);
+  const roots = [env.ANDROID_HOME, env.ANDROID_SDK_ROOT, ...runnerRoots, env.HOME && join(env.HOME, 'Android/Sdk')].filter(Boolean);
   for (const root of roots) {
     const tools = join(root, 'build-tools');
     if (!existsSync(tools)) continue;

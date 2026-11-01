@@ -168,7 +168,7 @@ test('finds the newest aapt2 in the Android SDK', () => {
       writeFileSync(join(root, 'build-tools', version, 'aapt2'), '');
     }
     assert.equal(findAapt2({ ANDROID_HOME: root }), join(root, 'build-tools', '36.0.0', 'aapt2'));
-    assert.throws(() => findAapt2({ ANDROID_HOME: join(root, 'missing'), HOME: join(root, 'nohome') }), /aapt2 not found/);
+    assert.throws(() => findAapt2({ ANDROID_HOME: join(root, 'missing'), HOME: join(root, 'nohome') }, { runnerRoots: [] }), /aapt2 not found/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
