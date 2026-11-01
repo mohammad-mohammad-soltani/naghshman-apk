@@ -8,10 +8,15 @@ const root = new URL('../', import.meta.url);
 
 test('plays the site Lottie splash, bundled for first and offline launches', () => {
   const source = readFileSync(new URL('src/components/launch-splash.tsx', root), 'utf8');
+  const nativeSource = readFileSync(new URL('src/components/launch-splash-source.ts', root), 'utf8');
 
-  assert.match(source, /require\("\.\.\/\.\.\/assets\/splash\/splash-light\.json"\)/);
-  assert.match(source, /require\("\.\.\/\.\.\/assets\/splash\/splash-dark\.json"\)/);
-  assert.match(source, /readCachedSplash\(theme\) \?\? BUNDLED_SPLASH\[theme\]/);
+  // Prebuilt dotLottie files that Lottie reads natively, never JSON in the bundle.
+  assert.match(nativeSource, /require\("\.\.\/\.\.\/assets\/splash\/splash-light\.lottie"\)/);
+  assert.match(nativeSource, /require\("\.\.\/\.\.\/assets\/splash\/splash-dark\.lottie"\)/);
+  assert.doesNotMatch(nativeSource, /\.json"\)|optimizeLottie/);
+  assert.match(nativeSource, /\? \{ uri: cached \}[\s\S]*: \(BUNDLED_SPLASH\[theme\]/);
+  assert.match(source, /launchSplashSource\(theme\)/);
+  assert.doesNotMatch(source, /optimizeLottie/);
   assert.match(source, /<LottieView[\s\S]*loop=\{false\}[\s\S]*resizeMode="contain"/);
   assert.doesNotMatch(source, /massage\.generated\.json|SvgXml/);
 

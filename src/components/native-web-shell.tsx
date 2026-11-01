@@ -288,15 +288,21 @@ function nativeBootstrap(
     // than its mid-animation position, and the app animates alongside.
     var lastLayout = '';
     var layoutFrame = 0;
+    var playerSelector = '[aria-label="پخش‌کننده صوت"]';
+    // The elements the last report measured.
+    var trackedNav = null;
+    var trackedPlayer = null;
     var reportLayout = function () {
       layoutFrame = 0;
       var viewport = window.innerHeight || 0;
       var nav = document.getElementById('bottomNavBar');
+      var player = document.querySelector(playerSelector);
+      trackedNav = nav;
+      trackedPlayer = player;
       var shell = nav && nav.closest('[data-scroll-down]');
       var scrolledAway = Boolean(shell && shell.getAttribute('data-scroll-down') === 'true');
       var navShown = Boolean(nav && nav.offsetHeight > 0 && window.getComputedStyle(nav).display !== 'none');
       var navHeight = navShown ? nav.offsetHeight : 0;
-      var player = document.querySelector('[aria-label="پخش‌کننده صوت"]');
       var audioTop = null;
       if (player && player.offsetHeight > 0) {
         // Its untransformed top, then where the scroll-away shift will leave it.
@@ -318,8 +324,41 @@ function nativeBootstrap(
     var scheduleLayout = function () {
       if (!layoutFrame) layoutFrame = window.requestAnimationFrame(reportLayout);
     };
+    var touchesTracked = function (node) {
+      return Boolean(
+        (trackedNav && node.contains(trackedNav)) ||
+        (trackedPlayer && node.contains(trackedPlayer))
+      );
+    };
+    var bringsTracked = function (node) {
+      if (node.nodeType !== 1) return false;
+      if (node.id === 'bottomNavBar' || node.matches(playerSelector)) return true;
+      return Boolean(node.querySelector('#bottomNavBar, ' + playerSelector));
+    };
+    // Measuring forces a synchronous layout, so only re-measure for changes
+    // that can move the nav or the player. The site toggles classes all over
+    // the page while it scrolls and animates; re-measuring for each of those
+    // would cost a forced layout on those frames.
+    var affectsLayout = function (record) {
+      if (record.type === 'attributes') {
+        return record.attributeName !== 'class' || touchesTracked(record.target);
+      }
+      if ((trackedNav && !trackedNav.isConnected) || (trackedPlayer && !trackedPlayer.isConnected)) return true;
+      for (var i = 0; i < record.addedNodes.length; i += 1) {
+        if (bringsTracked(record.addedNodes[i])) return true;
+      }
+      return false;
+    };
     var watchLayout = function () {
-      new MutationObserver(scheduleLayout).observe(document.documentElement, {
+      new MutationObserver(function (records) {
+        if (layoutFrame) return;
+        for (var i = 0; i < records.length; i += 1) {
+          if (affectsLayout(records[i])) {
+            scheduleLayout();
+            return;
+          }
+        }
+      }).observe(document.documentElement, {
         subtree: true,
         childList: true,
         attributes: true,
@@ -373,11 +412,20 @@ function nativeBootstrap(
         });
       };
 
+      // One pass per frame, however many DOM batches land in it: each pass
+      // measures every image.
+      var warmupScheduled = false;
+      var runLaunchMediaWarmup = function () {
+        warmupScheduled = false;
+        warmLaunchMedia();
+      };
       var scheduleLaunchMediaWarmup = function () {
+        if (warmupScheduled) return;
+        warmupScheduled = true;
         if (typeof window.requestAnimationFrame === 'function') {
-          window.requestAnimationFrame(warmLaunchMedia);
+          window.requestAnimationFrame(runLaunchMediaWarmup);
         } else {
-          window.setTimeout(warmLaunchMedia, 0);
+          window.setTimeout(runLaunchMediaWarmup, 0);
         }
       };
 
@@ -481,12 +529,23 @@ function nativeBootstrap(
           }
         }
       };
+      // Coalesced to one style read per frame; an explicit theme wins.
+      var backgroundScheduled = false;
+      var pendingTheme;
+      var runBackgroundReport = function () {
+        backgroundScheduled = false;
+        var theme = pendingTheme;
+        pendingTheme = undefined;
+        reportBackground(theme);
+      };
       var scheduleBackgroundReport = function (explicitTheme) {
-        var run = function () { reportBackground(explicitTheme); };
+        if (typeof explicitTheme === 'string') pendingTheme = explicitTheme;
+        if (backgroundScheduled) return;
+        backgroundScheduled = true;
         if (typeof window.requestAnimationFrame === 'function') {
-          window.requestAnimationFrame(run);
+          window.requestAnimationFrame(runBackgroundReport);
         } else {
-          window.setTimeout(run, 0);
+          window.setTimeout(runBackgroundReport, 0);
         }
       };
       var observeBackground = function () {
@@ -1553,7 +1612,9 @@ export function NativeWebShell() {
         // iOS already shows its system microphone/camera prompt for the app;
         // WKWebView must not stack a second, per-site prompt on top of it.
         mediaCapturePermissionGrantType="grant"
-        androidLayerType={Platform.OS === "android" ? "hardware" : undefined}
+        // No androidLayerType: Chromium already composites the page on the
+        // GPU. A hardware layer would redraw the whole page into one more
+        // full-screen texture on every scroll frame.
         automaticallyAdjustContentInsets={false}
         contentInsetAdjustmentBehavior="never"
         renderLoading={() => (

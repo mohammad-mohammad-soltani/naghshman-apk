@@ -5,9 +5,11 @@ import {
   parseLottie,
   parseSplashMeta,
   splashUrl,
+  SPLASH_THEMES,
   type SplashMeta,
   type SplashTheme,
 } from "@/lib/splash-cache";
+import { optimizeLottie } from "@/lib/lottie-optimize";
 
 // The persistent copy of the site's launch animation. Everything here is
 // best-effort: a missing or unreadable cache simply falls back to the
@@ -17,8 +19,34 @@ function splashDirectory(): Directory {
   return new Directory(Paths.document, "splash");
 }
 
+// Bump when lottie-optimize changes its output, so older copies are fetched
+// and optimized again instead of played as they are.
+const OPTIMIZED_REVISION = 1;
+
+/** Stored already optimized, so a launch hands Lottie a file path and no JSON. */
 function splashFile(theme: SplashTheme): File {
-  return new File(splashDirectory(), `splash-${theme}.json`);
+  return new File(
+    splashDirectory(),
+    `splash-${theme}.o${OPTIMIZED_REVISION}.json`,
+  );
+}
+
+/** Copies from older app versions, stored as downloaded. */
+function removeStaleSplashFiles() {
+  try {
+    const current = new Set(SPLASH_THEMES.map((theme) => splashFile(theme).name));
+    for (const entry of splashDirectory().list()) {
+      if (
+        entry instanceof File &&
+        /^splash-(light|dark)\..*json$/.test(entry.name) &&
+        !current.has(entry.name)
+      ) {
+        entry.delete();
+      }
+    }
+  } catch {
+    // Harmless leftovers; the next update tries again.
+  }
 }
 
 function metaFile(): File {
@@ -53,11 +81,18 @@ function updateSplashMeta(update: (meta: SplashMeta) => SplashMeta) {
   }
 }
 
-/** The last downloaded animation, or null to use the bundled one. */
-export function readCachedSplash(theme: SplashTheme): Record<string, unknown> | null {
+/**
+ * The plain file path of the last downloaded (and optimized) animation, or
+ * null to use the bundled one. Only an existence check: Lottie reads the file
+ * itself, natively and off the UI thread.
+ */
+export function cachedSplashPath(theme: SplashTheme): string | null {
   try {
     const file = splashFile(theme);
-    return file.exists ? parseLottie(file.textSync()) : null;
+    if (!file.exists) return null;
+    // lottie-react-native opens plain paths as files; a file:// URI would be
+    // fetched as a URL instead.
+    return decodeURIComponent(file.uri.replace(/^file:\/\//, ""));
   } catch {
     return null;
   }
@@ -84,7 +119,7 @@ export async function checkForSplashUpdate(
   theme: SplashTheme,
   signal?: AbortSignal,
 ): Promise<SplashCheckResult> {
-  const cached = readCachedSplash(theme) !== null;
+  const cached = cachedSplashPath(theme) !== null;
   const validators = cached ? readSplashMeta()[theme] : undefined;
 
   let response: Response;
@@ -101,14 +136,20 @@ export async function checkForSplashUpdate(
     return { reachable: true, updated: false };
 
   let animation: Record<string, unknown> | null = null;
-  let text = "";
   try {
-    text = await response.text();
-    animation = parseLottie(text);
+    animation = parseLottie(await response.text());
   } catch {
     // A body cut off mid-download keeps the previous animation.
   }
   if (!animation) return { reachable: true, updated: false };
+
+  let text: string;
+  try {
+    // Once per new splash, instead of on every launch.
+    text = JSON.stringify(optimizeLottie(animation));
+  } catch {
+    return { reachable: true, updated: false };
+  }
 
   try {
     ensureDirectory();
@@ -118,6 +159,7 @@ export async function checkForSplashUpdate(
     temporary.create({ overwrite: true });
     temporary.write(text);
     await temporary.move(splashFile(theme), { overwrite: true });
+    removeStaleSplashFiles();
 
     const etag = response.headers.get("etag") ?? undefined;
     const lastModified = response.headers.get("last-modified") ?? undefined;

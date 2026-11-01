@@ -1,4 +1,4 @@
-import LottieView, { type AnimationObject } from "lottie-react-native";
+import LottieView from "lottie-react-native";
 import { useEffect, useMemo, useState } from "react";
 import {
   AccessibilityInfo,
@@ -13,17 +13,8 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 
-import { optimizeLottie } from "@/lib/lottie-optimize";
+import { launchSplashSource } from "@/components/launch-splash-source";
 import { SPLASH_BACKGROUND, type SplashTheme } from "@/lib/splash-cache";
-import { readCachedSplash } from "@/lib/splash-store";
-
-// The same light/dark animations the site plays, bundled for the very first
-// launch and for launches without a reachable site. A newer copy downloaded
-// from the site (see splash-store) takes precedence once it exists.
-const BUNDLED_SPLASH: Record<SplashTheme, Record<string, unknown>> = {
-  light: require("../../assets/splash/splash-light.json"),
-  dark: require("../../assets/splash/splash-dark.json"),
-};
 
 /** Matches the site's splash fade-out (`FADE_OUT_MS` in meydan's SplashScreen). */
 const FADE_OUT_MS = 450;
@@ -72,16 +63,11 @@ export function LaunchSplash({
   onHidden,
 }: LaunchSplashProps) {
   const insets = useSafeAreaInsets();
-  // Both sources passed `isValidLottie` (the bundled ones are the site's own).
-  // Optimized for lottie-android, which draws every shape group on the UI
-  // thread each frame: the same frames, far fewer draws (see lottie-optimize).
-  const source = useMemo(
-    () =>
-      optimizeLottie(
-        readCachedSplash(theme) ?? BUNDLED_SPLASH[theme],
-      ) as unknown as AnimationObject,
-    [theme],
-  );
+  // Both sources passed `isValidLottie` (the bundled ones are the site's own)
+  // and are already optimized for lottie-android, which draws every shape
+  // group on the UI thread each frame: the same frames, far fewer draws (see
+  // lottie-optimize).
+  const source = useMemo(() => launchSplashSource(theme), [theme]);
   const reducedMotion = useReducedMotion();
   const [faded, setFaded] = useState(!visible);
   const [animationDone, setAnimationDone] = useState(false);

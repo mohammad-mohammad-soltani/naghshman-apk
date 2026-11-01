@@ -26,6 +26,8 @@ test('configures the Meydan launcher and splash assets', () => {
     '../assets/images/meydan-icon-foreground.png',
     '../assets/splash/splash-light.json',
     '../assets/splash/splash-dark.json',
+    '../assets/splash/splash-light.lottie',
+    '../assets/splash/splash-dark.lottie',
   ]) {
     assert.equal(existsSync(new URL(path, import.meta.url)), true, `${path} must exist`);
   }

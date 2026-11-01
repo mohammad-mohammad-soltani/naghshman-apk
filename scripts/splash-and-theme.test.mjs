@@ -47,9 +47,10 @@ test('light mode can never report an interpolated or stale gray system-bar color
 });
 
 
-test('native shell enables hardware rendering and strips the expensive blur animation only in-app', () => {
+test('native shell leaves WebView compositing to Chromium and strips the expensive blur animation only in-app', () => {
   const source = readFileSync(new URL('src/components/native-web-shell.tsx', root), 'utf8');
-  assert.match(source, /androidLayerType=\{Platform\.OS === "android" \? "hardware" : undefined\}/);
+  // An extra hardware layer double-composites every scroll frame.
+  assert.doesNotMatch(source, /androidLayerType=/);
   assert.match(source, /naghshman-native-performance/);
   assert.match(source, /read-more-reveal-open/);
   assert.match(source, /filter: none !important/);

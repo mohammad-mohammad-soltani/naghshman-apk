@@ -50,6 +50,20 @@ function writeLaunchStatusBarBools(resDir) {
   }
 }
 
+// The splash animations reach Lottie as raw resources looked up by name from
+// JS (see scripts/build-splash.mjs), which the release resource shrinker
+// cannot see. Keep them explicitly.
+const SPLASH_RAW_KEEP = `<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools"
+  tools:keep="@raw/assets_splash_splash*" />
+`;
+
+function writeSplashRawKeep(resDir) {
+  const dir = path.join(resDir, 'raw');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'launch_splash_keep.xml'), SPLASH_RAW_KEEP);
+}
+
 function configureAndroidManifest(manifest) {
   const application = manifest.manifest.application?.[0];
   if (!application) throw new Error('Android application manifest is missing');
@@ -66,9 +80,12 @@ module.exports = (config) => {
   config = withDangerousMod(config, [
     'android',
     (mod) => {
-      writeLaunchStatusBarBools(
-        path.join(mod.modRequest.platformProjectRoot, 'app/src/main/res'),
+      const resDir = path.join(
+        mod.modRequest.platformProjectRoot,
+        'app/src/main/res',
       );
+      writeLaunchStatusBarBools(resDir);
+      writeSplashRawKeep(resDir);
       return mod;
     },
   ]);
@@ -80,3 +97,4 @@ module.exports = (config) => {
 module.exports.configureLaunchTheme = configureLaunchTheme;
 module.exports.configureAndroidManifest = configureAndroidManifest;
 module.exports.launchStatusBarBools = launchStatusBarBools;
+module.exports.SPLASH_RAW_KEEP = SPLASH_RAW_KEEP;
