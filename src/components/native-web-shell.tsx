@@ -650,6 +650,11 @@ export function NativeWebShell() {
   const softRetryUrl = useRef<string | null>(null);
   // Unlike completedDocumentUrl, this survives the next navigation attempt.
   const lastGoodDocumentUrl = useRef<string | null>(null);
+  /**
+   * The address on screen, client-side navigations included (they never fire
+   * onLoad). A rebuilt WebView reopens here instead of at the launch address.
+   */
+  const lastViewedUrl = useRef<string | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const webViewProcessDead = useRef(false);
   const shellStateRef = useRef(INITIAL_WEB_SHELL_STATE);
@@ -1033,8 +1038,12 @@ export function NativeWebShell() {
       );
       return;
     }
-    webViewRef.current?.reload();
-  }, []);
+    // The failure belongs to the page that is still on screen and working:
+    // reloading it would throw away what the user is reading or typing (a
+    // half-filled form, a send in flight). Leave it be.
+    softRetryUrl.current = null;
+    dispatchShellEvent({ type: "load-succeeded" });
+  }, [dispatchShellEvent]);
 
   const retryFailedPage = useCallback(() => {
     // A manual retry is also allowed if the OS has detected an offline first
@@ -1054,6 +1063,10 @@ export function NativeWebShell() {
 
     if (webViewProcessDead.current) {
       webViewProcessDead.current = false;
+      // Reopen where the user was, not at the launch address. A redirect loop
+      // (handled as a dead process too) must start over from the clean source.
+      const resume = redirectFailureRef.current ? null : lastViewedUrl.current;
+      if (resume && isInitialWebDocument(resume)) setInitialWebUrl(resume);
       setWebViewGeneration((generation) => generation + 1);
     } else {
       webViewRef.current?.reload();
@@ -1480,8 +1493,15 @@ export function NativeWebShell() {
     )
       return;
     const timer = setTimeout(() => {
-      handlePageFailure();
       webViewRef.current?.stopLoading();
+      // Once a page is up, a later load that never finishes is simply dropped:
+      // failing it would schedule a silent retry, i.e. a reload of the page
+      // the user is still on.
+      if (shellStateRef.current.initialReady) {
+        setLoading(false);
+        return;
+      }
+      handlePageFailure();
     }, 45000);
     return () => clearTimeout(timer);
   }, [
@@ -1632,6 +1652,8 @@ export function NativeWebShell() {
         onShouldStartLoadWithRequest={shouldStartLoad}
         onNavigationStateChange={(navigation) => {
           canGoBackRef.current = navigation.canGoBack;
+          if (navigation.url && isInitialWebDocument(navigation.url))
+            lastViewedUrl.current = navigation.url;
         }}
         onLoadStart={handleLoadStart}
         onLoad={handleLoad}
